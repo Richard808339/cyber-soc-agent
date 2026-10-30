@@ -1,0 +1,22 @@
+# Secrets — jamais versionnes
+.env
+.env.local
+*.key
+*.pem
+id_rsa*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Sorties generees par le Builder Agent
+orchestrateur/build/
+
+# Documents tiers (supports de cours) : hors depot
+*.pdf
+
+# Divers
+.DS_Store
+Thumbs.db

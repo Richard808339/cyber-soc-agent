@@ -1,0 +1,86 @@
+BILAN SOC — STACK WAZUH (WSL "wazuh")
+Établi le 28/10/2026 20:20 · Source : API Wazuh 55000 + indexer 9200, lecture seule
+
+RÉPONSE À LA QUESTION
+Oui, j'ai trouvé le Cyber SOC et j'y ai accès : distribution WSL "wazuh", stack
+Wazuh 4.14.9 single-node (manager + indexer + dashboard) lancée par docker compose
+depuis /opt/wazuh-docker/single-node. Authentification réussie avec le mot de passe
+par défaut documenté (wazuh-wui) — c'est déjà un constat de sécurité.
+
+ÉTAT DE LA PLATEFORME : SAIN
+  Containers     3/3 Up 9 heures (démarrés 28/10 14:22 UTC), 0 redémarrage
+  Indexer        wazuh-cluster GREEN, 1 noeud, 23 shards actifs, 0 unassigned
+  Clustering     multi-noeuds DÉSACTIVÉ (enabled=no, running=no) -> pas de HA
+  Ressources     disque 21 Go / 1007 Go (3%), RAM 3,0 / 7,8 Go, 8 vCPU
+  Exposition     443, 9200, 55000, 1514, 1515, 514/udp en 0.0.0.0 dans WSL,
+                 relayés uniquement sur localhost côté Windows -> pas d'accès LAN
+
+COUVERTURE : LE DÉFAUT MAJEUR
+  2 agents enregistrés, tous deux locaux :
+    000  wazuh.manager  127.0.0.1  actif   (l'agent du manager lui-même)
+    001  zbook-hp       127.0.0.1  actif   (agent interne au WSL)
+  L'hôte Windows KOFFI, lui, n'apparaît pas :
+    - service WazuhSvc : RUNNING
+    - dossier agent présent, client.keys local = 83 octets
+    - 1 connexion sortante vers 1514 ouverte
+    - mais AUCUNE ligne correspondante dans la liste des agents du manager
+  Cause la plus probable, corroborée par le journal manager :
+    "wazuh-remoted: WARNING: Agent key already in use: agent ID '001'" (28/10 14:32)
+    -> collision d'identifiant : l'agent WSL occupe l'ID 001 que l'agent Windows
+    revendique. Le poste de travail est donc muet pour le SOC.
+  Conséquence directe : les expositions relevées ce soir sur KOFFI (AnyDesk
+  0.0.0.0:7070, SMB 139 ouvert, python :5000) ne produiraient aucune alerte.
+
+DÉTECTION SUR 24 H : 976 ALERTES, ZÉRO CRITIQUE
+  Niveau 9 : 4      Niveau 7 : 403     Niveau 5 : 43
+  Niveau 4 : 11     Niveau 3 : 515
+  Aucune alerte de niveau >= 10 sur 7 jours.
+  Top règles : 197 Windows Logon Success, 43 Software protection service,
+  36 Windows System error event, 9 rapport de signatures, 7 Service startup type
+  was changed, 2 CIS Win11 "Score less than 30%", 2 VSS idle shutdown.
+  Bruit : près de 9 alertes sur 10 sont de l'informationnel (niveaux 3 et 7).
+  Signal réel : quasi nul. Aucune règle ne remonte d'activité suspecte, et la
+  seule alerte de conformité dit que le poste est sous 30 % de la baseline CIS.
+
+GESTION DES VULNÉRABILITÉS : INOPÉRANTE
+  Index wazuh-states-vulnerabilities-* : 1 seul document (le manager).
+  Module content-updater en échec, vérifié dans les logs :
+    "Couldn't run full content download: Error -1 from server: Timeout was reached"
+    "Action for 'vulnerability_feed_manager' failed"
+  Sans flux CVE à jour, aucune détection de vulnérabilité n'est possible.
+
+HISTORIQUE : 9 HEURES
+  Un seul index d'alertes (wazuh-alerts-4.x-2026.10.28, 976 documents, 3,4 Mo).
+  Rien avant : la stack n'a été démarrée qu'aujourd'hui 14:22. Il n'existe donc
+  aucun historique, aucune tendance, aucune comparaison possible.
+
+INCIDENTS TECHNIQUES RÉCENTS
+  14:24  indexer-connector 503 "Server error" x2 (transitoire au démarrage)
+  14:24  pipeline/output.go "temporary bulk send failure"
+  14:32  agent key already in use: agent ID '001'  <- cause du trou de couverture
+  23:05  content-updater: échec téléchargement des flux (timeout)
+
+ÉCARTS DE SÉCURITÉ SUR LE SOC LUI-MÊME
+  1. Mots de passe par défaut (wazuh-wui / admin) encore actifs sur l'API et l'indexer.
+  2. Indexer 9200 accessible en HTTP non chiffré à l'intérieur du WSL.
+  3. Clustering désactivé, un seul noeud : perte du noeud = perte du SOC, sans copie.
+  4. Aucune rétention/ILM visible au-delà de l'index du jour.
+
+VERDICT
+  Le SOC existe, il tourne, son socle est sain. Mais il ne surveille que lui-même :
+  un agent manquant, un flux CVE cassé, un historique de neuf heures et 90 % de bruit.
+  En l'état, il ne détecterait pas une compromission du poste qu'il est censé protéger.
+  Score de maturité estimé : 2/5 (socle technique opérationnel, capacité de détection
+  non prouvée).
+
+PLAN DE REMISE EN ÉTAT, PAR ORDRE
+  1. Réparer la couverture : réenregistrer l'agent Windows sous un ID libre (002) et
+     retirer la clé 001 dupliquée. Sans cela, tout le reste est décoratif.
+  2. Réparer le flux CVE (content-updater) : proxy/DNS/sortie HTTPS depuis le WSL.
+  3. Baisser le bruit : désactiver les règles Windows Logon Success et les événements
+     d'information niveau 3, monter le seuil d'alerte à 7 pour la consultation.
+  4. Changer les mots de passe par défaut de l'API et de l'indexer.
+  5. Ajouter les règles de détection qui manquent pour le poste : écoute AnyDesk,
+     partages SMB, nouveaux comptes locaux, exclusions Defender posées.
+  6. Planifier un scan SCA et un scan de vulnérabilités quotidien, et vérifier la
+     rétention des index (au moins 30 jours).

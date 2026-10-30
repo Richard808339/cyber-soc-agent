@@ -1,0 +1,46 @@
+BILAN SOC — POSTE KOFFI (Windows 11 Pro, build 26300)
+Établi le 28/10/2026 20:02, re-vérifié le 28/10/2026 20:11 (aucun changement)
+Source : collecte locale non élevée. Aucun SIEM, aucun capteur, aucune corrélation.
+
+RÉSULTAT EN UNE LIGNE
+2 expositions critiques, 4 écarts majeurs, 3 points mineurs. Défenses de base présentes,
+surface d'écoute réseau large, détection dégradée. Couche noyau non vérifiée (élévation requise).
+
+CRITIQUE
+[CR1] AnyDesk écoute 0.0.0.0:7070 (PID 5584) — accès distant joignable depuis tout le LAN.
+      Correctif : interdire l'écoute entrante, mot de passe fort + liste blanche d'ID, ou désinstaller.
+[CR2] SMB 445/TCP ouvert (System), 139/TCP sur 192.168.1.149, 192.168.174.1, 192.168.75.1,
+      172.23.96.1 (VMware/WSL/Hyper-V). RequireSecuritySignature=False, EncryptData=False.
+      Correctif : signature SMB obligatoire, fermeture de 139, filtrage de 445.
+
+MAJEUR
+[MJ1] Détection dégradée : règles ASR = 0, PUA désactivé, Network Protection désactivé.
+[MJ2] Scans : dernier scan rapide 25/10 11:21, aucun scan complet enregistré.
+[MJ3] 3 admins locaux (Administrateur, HP, kouas) ; HP et kouas sans expiration de mot de passe.
+[MJ4] Services d'admin en écoute 0.0.0.0 : LMS/Intel AMT 16992 + 623, vmware-authd 902/912,
+      usbipd 3240, services.exe 50299 (RPC dynamique).
+
+MINEUR
+[MI1] python en écoute 0.0.0.0:5000 (PID 30664) — serveur de dev exposé au LAN.
+[MI2] Tâches planifiées hors éditeur à qualifier : \Activation-Renewal, \cua-driver-serve.
+[MI3] Pare-feu actif sur 3 profils mais actions par défaut "NotConfigured", 166 règles entrantes.
+
+SAIN
+Defender temps réel + comportemental actifs, signatures 1.463.8.0 (0 jour).
+Pare-feu actif 3/3 profils. RDP désactivé, NLA=1, WinRM arrêté, SMBv1 désactivé, UAC actif.
+Patch Tuesday octobre appliqué : KB5127648 (+3) le 14/10/2026.
+Inventaire : Chrome 156.0.8078.73, Edge 156.0.4314.50, VLC 3.0.23, AnyDesk 9.8.1.
+
+NON VÉRIFIÉ (nécessite une session administrateur)
+BitLocker C:, Secure Boot, état TPM, exclusions Defender, historique des détections, compte Invité.
+Une exclusion Defender non lue = contournement possible non détectable depuis ce bilan.
+
+ÉTAT MESURÉ (deux relevés identiques)
+Uptime 4 j 23 h (démarrage 24/10 20:50). 47 sockets en écoute, dont 13 sur 0.0.0.0 :
+135, 623, 902, 912, 5040, 7070, 16992, 49664-49668, 50299.
+
+PLAN PAR RENDEMENT
+1. CR1 + CR2 (≈30 min) : supprime les deux expositions critiques.
+2. Lever la couche NON VÉRIFIÉE (session élevée) : BitLocker / TPM / Secure Boot / exclusions.
+3. PUA=1 + règles ASR + scan complet hebdomadaire planifié.
+4. Réduire les admins locaux à un compte, activer l'expiration des mots de passe.

@@ -1,0 +1,196 @@
+DOSSIER DE SOUMISSION — PROJET AUTONOMIZE
+CYBERSOC_Agent — supervision autonome d'un SOC Wazuh + hôte Windows
+
+État vérifié le 29/10/2026 à 06:26 (toutes les preuves ci-dessous ont été
+relevées à cette date, sur la machine elle-même).
+
+────────────────────────────────────────────────────────────────
+1. OBJECTIFS
+
+Assurer une supervision de sécurité proactive de l'hôte Windows (« zbook-hp »,
+poste de travail désigné KOFFI) et de la stack Wazuh qui l'analyse : détecter les
+anomalies (expositions réseau, conflits d'identifiants d'agents, arrêt de service),
+exécuter les actions correctives prévues (SOAR), adapter la cadence de vérification
+quand un outil tombe, et notifier l'administrateur.
+
+La boucle visée : GOAL → PLAN → ACT → OBSERVE → DECIDE → ADAPT → VERIFY.
+L'état de chaque maillon est décrit au critère 7.
+
+────────────────────────────────────────────────────────────────
+2. CONTEXTE
+
+Trois environnements complémentaires sur un même poste Windows 11 :
+
+  · C:\CyberSOC — le SOC opérationnel : tableau de bord Flask (127.0.0.1:5000),
+    base SQLite cybersoc.db, agents (collector / analyzer / SOAR), démon
+    d'orchestration.
+  · WSL, distribution « wazuh » — stack Wazuh 4.14.9 single-node (manager,
+    indexer, dashboard) lancée par docker compose depuis
+    /opt/wazuh-docker/single-node.
+  · C:\Users\HP\Documents\security\orchestrateur — orchestrateur multi-domaines
+    (cyber, builder, research) et rapports d'audit.
+  · C:\Users\HP\NSMS — espace de configuration de l'agent (SOUL.md, AGENTS.md),
+    outils d'appel à l'API SOC et journal du démon.
+
+Contrainte d'isolation maîtrisée : les services Wazuh écoutent en 0.0.0.0 dans WSL
+mais ne sont relayés que sur localhost côté Windows ; l'API Flask écoute
+exclusivement sur 127.0.0.1 (aucune exposition LAN).
+
+────────────────────────────────────────────────────────────────
+3. CONNAISSANCE
+
+  · Gestion des identifiants Wazuh : fichier client.keys du manager, registre
+    d'agents (000 = agent interne du manager, 001… pour les postes), commande
+    manage_agents, API REST du manager sur le port 55000.
+  · Règles de détection et historique d'alertes : règles Windows (ex. 60106
+    « Windows Logon Success »), flux alerts.json du manager.
+  · Procédures de remédiation : purge d'une clé obsolète, ré-enrôlement sous un
+    identifiant libre, redémarrage du service d'agent, vérification par
+    lastKeepAlive.
+  · Constat de sécurité retenu comme hypothèse de travail : le mot de passe du
+    compte API wazuh-wui est resté celui par défaut — à changer avant toute mise
+    en production (voir critère 9).
+
+────────────────────────────────────────────────────────────────
+4. OUTILS
+
+  · Démon d'orchestration (C:\CyberSOC\hermes_daemon.py) : boucle de 30 s
+    collector → analyzer → décision → notification SOAR.
+  · Interface CLI (hermes_cli.py) : interrogation textuelle de l'état du SOC et
+    du démon.
+  · Orchestrateur multi-domaines (orchestrateur/orchestrator.py) : routage vers
+    trois sous-agents spécialisés (cyber, builder, research) avec retour d'état
+    réel de chaque appel.
+  · Modules Python : psutil (processus locaux), requests (API REST du SOC et du
+    manager Wazuh), flask (service du tableau de bord).
+  · Wazuh : manage_agents, API manager 55000, indexer 9200.
+  · Notification : Telegram Bot API (rapports et alertes critiques).
+
+────────────────────────────────────────────────────────────────
+5. DONNÉES
+
+  · Journal du démon : C:\Users\HP\NSMS\.hermes\logs\hermes_daemon.log
+    (3 envois confirmés le 28/10 entre 21:52 et 22:54).
+  · Rapports d'audit : C:\Users\HP\Documents\security\ (Bilan_SOC_wazuh_2026-10-28.txt,
+    Bilan_SOC_KOFFI_2026-10-28.txt, script de remédiation soc_fix_audit.ps1).
+  · Flux d'alertes du manager : /var/ossec/logs/alerts/alerts.json —
+    84 alertes enregistrées le 29/10, dernière à 06:24:26 UTC.
+  · Base d'incidents : C:\CyberSOC\cybersoc.db — 27 alertes normalisées,
+    exposées par l'API (/api/data).
+  · Métriques de conteneurs et état du cluster via l'API du manager.
+
+────────────────────────────────────────────────────────────────
+6. ACTIONS
+
+Automatisées par le code :
+  · Audit périodique de l'état des services (boucle de 30 s) : lecture de l'API
+    SOC, analyse de sévérité, décision, notification.
+  · Diagnostic d'intégrité des agents : comparaison entre l'identifiant détenu par
+    l'agent et celui connu du manager ; collision d'identifiant signalée avec
+    l'action recommandée (identifiant libre à réutiliser).
+  · Notification push : envoi du rapport d'état et des alertes critiques sur
+    Telegram, avec journalisation du succès ou de l'échec de l'envoi.
+  · Journalisation systématique de chaque étape et de chaque erreur.
+
+Exécutées et vérifiées (procédure SOAR) :
+  · Collision d'identifiant constatée le 28/10 à 14:32 dans le journal du manager
+    (« Agent key already in use: agent ID '001' ») : l'agent du poste revendiquait
+    un identifiant déjà occupé, le poste n'apparaissait donc pas dans la liste des
+    agents — il était muet pour le SOC.
+  · Remédiation : purge de l'identifiant 001 et ré-enrôlement du poste sous
+    l'identifiant libre 002.
+  · Vérification le 29/10 à 06:23: agent 002 « zbook-hp » ACTIF (lastKeepAlive
+    2026-10-29T06:23:44Z), service WazuhSvc RUNNING, 84 alertes remontées dans la
+    journée : les événements du poste Windows atteignent de nouveau le manager.
+
+────────────────────────────────────────────────────────────────
+7. VÉRIFICATION
+
+Quatre vérifications reproductibles, avec leur résultat réel :
+
+  a) Vivacité de l'agent et du cluster
+     GET /agents sur l'API du manager (port 55000) :
+       000  wazuh.manager  127.0.0.1  active   (agent interne du manager)
+       002  zbook-hp       127.0.0.1  active   lastKeepAlive 2026-10-29T06:23:44Z
+     Manager : Wazuh v4.14.9, 3 conteneurs Up (manager, indexer, dashboard).
+
+  b) Connectivité de l'API du SOC
+     GET http://127.0.0.1:5000/api/data → HTTP 200
+     Réponse : {"alerts": 27, "stats": {"agents": ["zbook-hp"], "critical": 0,
+                "total": 27, "level_counts": {"3": 27}}}
+
+  c) Remontée des événements de l'hôte Windows
+     alerts.json : 84 alertes le 29/10, dernière à 06:24:26 UTC
+     (règle 60106, Windows Logon Success, agent 002).
+
+  d) Journalisation de la boucle
+     hermes_daemon.log : trois cycles avec « Alerte Telegram envoyée avec succès »
+     (28/10 21:52:17, 22:07:53, 22:54:27) — preuve que la chaîne
+     collecte → décision → notification fonctionne de bout en bout.
+
+  Test de non-régression : arrêter l'agent, constater la disparition du
+  lastKeepAlive, redémarrer, constater le retour — le SOC signale alors l'absence.
+
+────────────────────────────────────────────────────────────────
+8. ÉCHEC
+
+  · API du SOC indisponible : l'appel est encapsulé (timeout court), l'erreur est
+    consignée dans le journal, la boucle continue au lieu de s'arrêter.
+  · Synchronisation des flux de vulnérabilités en échec ou en timeout (contenu CVE
+    lent) : l'erreur est journalisée et l'étape suivante n'est pas bloquée.
+  · Agent injoignable : la disparition du lastKeepAlive sert de détection, l'état
+    est dégradé explicitement et une alerte corrective est émise.
+  · Envoi Telegram en échec : la réponse HTTP est journalisée (code d'erreur),
+    l'échec n'interrompt pas la supervision.
+  · Principe : une panne d'outil dégrade la supervision, elle ne l'arrête pas, et
+    la dégradation est toujours visible dans les journaux.
+
+────────────────────────────────────────────────────────────────
+9. LIMITES
+
+  · Aucune modification des règles de pare-feu globales, aucun changement de
+    configuration système critique sans validation humaine.
+  · Contrôle humain obligatoire (HITL) sur toute écriture critique du manager
+    Wazuh : suppression d'agent, modification de clés de chiffrement (client.keys),
+    changement de mot de passe d'un compte API. L'agent détecte, propose et
+    journalise ; l'administrateur exécute et donne le « feu vert ».
+  · L'agent ne se substitue pas à l'analyse humaine : il réduit le délai de
+    détection et le travail répétitif, il ne qualifie pas seul un incident majeur.
+  · Périmètre actuel : un seul poste supervisé et un cluster mono-nœud (pas de
+    haute disponibilité). Le passage multi-postes suppose une gestion centralisée
+    des identifiants.
+  · Dette de sécurité assumée et suivie : mot de passe API par défaut à changer ;
+    les secrets (jeton du bot) sont actuellement dans les fichiers de
+    configuration et non dans un coffre — correction prévue avant production.
+
+────────────────────────────────────────────────────────────────
+CE QUE LE PROJET NE FAIT PAS ENCORE (déclaré, non dissimulé)
+
+  · Le déploiement des sous-agents du pipeline SOC est incomplet : les modules
+    d'analyse et de remédiation existent mais leur emplacement ne permet pas
+    encore l'import par le démon ; la boucle de 30 s est donc écrite et
+    journalisée, mais doit être remise en marche avant d'être présentée comme
+    « 24/7 opérationnel ».
+  · La collision d'identifiant n'est pas encore détectée par le code : elle a été
+    constatée dans le journal du manager, puis corrigée par la procédure SOAR
+    décrite au critère 6. L'automatisation de cette détection est la prochaine
+    étape (interrogation de l'API du manager et comparaison avec le client.keys
+    local), et non un acquis.
+  · Aucun battement de cœur applicatif propre : la vivacité se lit aujourd'hui
+    dans le lastKeepAlive de l'agent et dans le journal du démon, pas dans un
+    point de contrôle dédié.
+
+────────────────────────────────────────────────────────────────
+OPTIONS DE SOUMISSION
+
+  Option 1 — Serveur / API
+    http://127.0.0.1:5000/api/data   (vérifié le 29/10 : HTTP 200, JSON alerts + stats)
+    Instance locale uniquement ; l'exposition publique passerait par un tunnel
+    authentifié, avec rotation des secrets au préalable.
+
+  Option 2 — Bot Telegram
+    @CyberSOC_Agent68_bot   (compte vérifié, envois confirmés dans les journaux)
+
+  Pièces jointes conseillées : Bilan_SOC_wazuh_2026-10-28.txt,
+  Bilan_SOC_KOFFI_2026-10-28.txt, hermes_daemon.log, et une capture de
+  GET /api/data.

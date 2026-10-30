@@ -1,0 +1,8 @@
+# run 2026-10-29T06:18:10Z UTC
+# cmd: python orchestrator.py cyber "controle de couverture"
+
+[ORCHESTRATOR] domaine=CYBER  payload='controle de couverture'
+
+[ROUTING] -> Cyber Agent (Wazuh, SOC, agents)
+[ERREUR] Cyber Agent (Wazuh, SOC, agents) : RuntimeError: authentification API refusee (identifiants wazuh-wui incorrects)
+# exit=1

@@ -1,0 +1,12 @@
+# run 2026-10-29T06:20:27Z UTC
+# cmd: python orchestrator.py cyber "controle de couverture"
+
+[ORCHESTRATOR] domaine=CYBER  payload='controle de couverture'
+
+[ROUTING] -> Cyber Agent (Wazuh, SOC, agents)
+  agents enregistres : 2
+    id=000  wazuh.manager    active        keepalive=9999-12-31T23:59:59  v4.14.9  inventaire=oui
+    id=002  zbook-hp         active        keepalive=2026-10-29T06:20:25  v4.14.9  inventaire=NON
+  alertes 24 h : 1547  repartition niveaux : {7: 759, 3: 705, 5: 64, 4: 12, 9: 7}
+[ECHEC] Cyber Agent (Wazuh, SOC, agents) : 2 agent(s), 2 actif(s), 0 hors ligne, 1547 alertes/24h, syscollector absent pour : zbook-hp
+# exit=1
