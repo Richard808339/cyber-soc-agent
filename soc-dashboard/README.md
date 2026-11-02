@@ -45,7 +45,9 @@ sécuriser et suffit ici.
 | `playbooks.py` | catalogue de pistes de réponse avec commandes prêtes |
 | `socstore.py` | schéma et requêtes SQLite |
 | `static/index.html` | interface (HTML/CSS/JS, aucun CDN) |
-| `test_soc.py` | 17 tests : métriques, score, bilan, playbooks, API de bout en bout |
+| `llm_stub.py` | faux fournisseur LLM compatible OpenAI, pour vérifier le bilan sans clé |
+| `run-collector.bat` / `.vbs` | lancement silencieux du collecteur (tâche planifiée) |
+| `test_soc.py` | 20 tests : métriques, score, bilan (dont le chemin LLM), playbooks, jetons, API |
 
 ## Démarrage
 
@@ -126,7 +128,12 @@ Les requêtes d'indexeur du catalogue ont été testées sur l'indexeur réel.
 ## Sécurité
 
 - `SOC_INGEST_TOKEN` : obligatoire en pratique ; sans lui, l'ingestion est ouverte.
-- `SOC_READ_TOKEN` : si défini, toutes les routes `/api/*` exigent `X-SOC-Token`.
+- `SOC_READ_TOKEN` : si défini, toutes les routes `/api/*` exigent `X-SOC-Token`
+  (ou `Authorization: Bearer`). L'interface demande alors le jeton au premier
+  chargement et le garde dans le `localStorage` du navigateur.
+  Pour amorcer sur un autre poste sans le taper : `http://hote:8765/#token=<jeton>`
+  — le fragment n'est jamais envoyé au serveur, il est mémorisé puis retiré de l'URL.
+  Vérifié : 401 sans jeton, 401 avec un mauvais jeton, 200 avec le bon.
 - Écoute sur `127.0.0.1` par défaut. Pour un accès distant, préférer un reverse proxy
   TLS devant `SOC_BIND=0.0.0.0` plutôt qu'une exposition directe.
 - `.env` et `soc.db` sont ignorés par git ; ne jamais versionner les identifiants.
@@ -136,8 +143,48 @@ Les requêtes d'indexeur du catalogue ont été testées sur l'indexeur réel.
 ## Tests
 
 ```bash
-python test_soc.py       # 17 tests, aucun accès Wazuh requis
+python test_soc.py       # 20 tests, aucun accès Wazuh ni clé LLM requis
 ```
+
+Le chemin « bilan rédigé par un modèle » est vérifié sans clé : `llm_stub.py` est un
+faux fournisseur compatible OpenAI qui renvoie un texte reprenant les chiffres reçus
+dans le prompt. Le test prouve ainsi que le snapshot part bien en HTTP et que le texte
+du modèle remplace celui du moteur de règles. Pour le voir dans l'interface :
+
+```bash
+python llm_stub.py --port 8899
+# .env : SOC_LLM_API_KEY=stub  SOC_LLM_BASE_URL=http://127.0.0.1:8899/v1  SOC_LLM_MODEL=stub-model
+# puis "Régénérer" dans l'interface : le badge passe à "LLM · stub-model"
+```
+
+## Planification de la collecte (Windows)
+
+Le collecteur doit tourner régulièrement, sinon le tableau de bord vieillit. Une tâche
+planifiée toutes les 5 minutes est déjà en place :
+
+```
+Tâche     : "SOC Dashboard Collector"
+Action    : wscript.exe ...\run-collector.vbs   (lance run-collector.bat sans fenêtre)
+Rythme    : toutes les 5 minutes, répétition illimitée
+Compte    : utilisateur courant (Interactive uniquement : tourne quand la session est ouverte)
+Journal   : soc-dashboard\collector.log
+```
+
+Recréer la tâche sur une autre machine :
+
+```powershell
+schtasks /Create /TN "SOC Dashboard Collector" `
+  /TR "wscript.exe \"C:\chemin\vers\soc-dashboard\run-collector.vbs\"" `
+  /SC MINUTE /MO 5 /F
+schtasks /Run /TN "SOC Dashboard Collector"     # test immédiat
+schtasks /End /TN "SOC Dashboard Collector"     # arrêt
+schtasks /Delete /TN "SOC Dashboard Collector" /F
+```
+
+Dans `run-collector.bat`, `PY` pointe vers l'interpréteur utilisé. Adapte ce chemin si
+Python est installé ailleurs. Pour que la collecte tourne même session fermée, il faut
+recréer la tâche avec un compte et un mot de passe (`/RU ... /RP ...`), ce qui demande
+les droits administrateur.
 
 ## Limites connues
 

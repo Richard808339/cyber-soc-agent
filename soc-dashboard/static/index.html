@@ -164,6 +164,24 @@
   </div>
 </main>
 
+<div class="modal" id="tokenModal">
+  <div class="box" style="max-width:520px">
+    <div class="hd"><h3>Jeton de lecture requis</h3></div>
+    <div class="bd">
+      <p style="margin-top:0;color:#cfe4f5">Ce tableau de bord est protégé. Saisis la valeur de
+        <code>SOC_READ_TOKEN</code> (fichier <code>.env</code> du serveur).</p>
+      <input id="tokenInput" type="password" autocomplete="off" placeholder="jeton de lecture"
+        style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--line);
+               background:#060a0f;color:var(--txt);font-family:var(--mono);font-size:13px">
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <button id="tokenClear">Effacer</button>
+        <button id="tokenSave" class="primary">Valider</button>
+      </div>
+      <div class="soft" id="tokenErr" style="margin-top:10px"></div>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="modal">
   <div class="box">
     <div class="hd">
@@ -180,6 +198,34 @@
 const $ = s => document.querySelector(s);
 const LEVEL_CLASS = l => l >= 12 ? 'crit' : l >= 8 ? 'high' : l >= 4 ? 'mid' : 'low';
 let state = {overview:null, filter:0};
+
+// --- Jeton de lecture (SOC_READ_TOKEN) -------------------------------------
+const TOKEN_KEY = 'soc_read_token';
+const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
+function apiFetch(url, opts = {}){
+  opts.headers = Object.assign({}, opts.headers || {}, getToken() ? {'X-SOC-Token': getToken()} : {});
+  return fetch(url, opts);
+}
+// Un lien du type /#token=... memorise le jeton sans l'envoyer au serveur.
+if(location.hash.startsWith('#token=')){
+  localStorage.setItem(TOKEN_KEY, decodeURIComponent(location.hash.slice(7)));
+  history.replaceState(null, '', location.pathname);
+}
+function askToken(msg){
+  $('#tokenErr').textContent = msg || '';
+  $('#tokenInput').value = '';
+  $('#tokenModal').classList.add('open');
+  setTimeout(() => $('#tokenInput').focus(), 50);
+}
+$('#tokenSave').onclick = () => {
+  const v = $('#tokenInput').value.trim();
+  if(!v){ $('#tokenErr').textContent = 'Jeton vide.'; return; }
+  localStorage.setItem(TOKEN_KEY, v);
+  $('#tokenModal').classList.remove('open');
+  load();
+};
+$('#tokenClear').onclick = () => { localStorage.removeItem(TOKEN_KEY); askToken('Jeton effacé.'); };
+$('#tokenInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('#tokenSave').click(); });
 
 function fmtAge(s){
   if(s == null) return 'jamais';
@@ -305,7 +351,7 @@ async function openPlaybook(key){
   $('#mBody').innerHTML = '<div class="empty">Chargement…</div>';
   $('#modal').classList.add('open');
   try{
-    const r = await fetch('/api/playbook/' + encodeURIComponent(key));
+    const r = await apiFetch('/api/playbook/' + encodeURIComponent(key));
     const {playbook:p} = await r.json();
     $('#mTitle').textContent = p.title;
     $('#mUrg').textContent = 'urgence ' + p.urgency;
@@ -346,7 +392,8 @@ function render(o){
 
 async function load(){
   try{
-    const r = await fetch('/api/overview');
+    const r = await apiFetch('/api/overview');
+    if(r.status === 401){ askToken('Jeton absent ou invalide.'); return; }
     const o = await r.json();
     if(!o.ready){ $('#summary').innerHTML = '<div class="empty">' + esc(o.message) + '</div>'; return; }
     render(o);
@@ -359,7 +406,7 @@ $('#btnRefresh').onclick = load;
 $('#btnSummary').onclick = async () => {
   $('#btnSummary').textContent = 'Génération…';
   try{
-    await fetch('/api/summary/refresh', {method:'POST'});
+    await apiFetch('/api/summary/refresh', {method:'POST'});
     await load();
   } finally { $('#btnSummary').textContent = 'Régénérer'; }
 };

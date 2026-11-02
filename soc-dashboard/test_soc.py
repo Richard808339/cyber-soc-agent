@@ -96,6 +96,31 @@ class TestSummary(unittest.TestCase):
         self.assertEqual(out["engine"], "regles")
         self.assertIn("LLM indisponible", out["fallback"])
 
+    def test_llm_chemin_complet_via_stub(self):
+        """Le chemin LLM est verifie de bout en bout contre un faux fournisseur local :
+        le snapshot part bien en HTTP et le texte du modele remplace le moteur de regles."""
+        import threading
+        import llm_stub
+
+        httpd, port = llm_stub.serve(0)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        os.environ["SOC_LLM_API_KEY"] = "stub"
+        os.environ["SOC_LLM_BASE_URL"] = "http://127.0.0.1:%d/v1" % port
+        os.environ["SOC_LLM_MODEL"] = "stub-model"
+        try:
+            out = summarizer.summarize(SNAPSHOT, prefer_llm=True)
+        finally:
+            for k in ("SOC_LLM_API_KEY", "SOC_LLM_BASE_URL", "SOC_LLM_MODEL"):
+                os.environ.pop(k, None)
+            httpd.shutdown()
+            httpd.server_close()
+
+        self.assertEqual(out["engine"], "llm")
+        self.assertEqual(out["model"], "stub-model")
+        self.assertIsNone(out["fallback"])
+        self.assertIn("921", out["text"])                 # les chiffres du snapshot ont transite
+        self.assertIn("2 poste(s) actif(s)", out["text"])
+
     def test_bilan_vide_ne_plante_pas(self):
         out = summarizer.summarize({"collected_at": "2026-11-02T00:00:00+00:00"}, prefer_llm=False)
         self.assertIn("## Situation", out["text"])
@@ -220,6 +245,27 @@ class TestStoreAndApi(unittest.TestCase):
             status, body = self._get(mauvais, raw=True)
             self.assertIn(status, (403, 404), mauvais)
             self.assertNotIn("SOC_INGEST_TOKEN", body)
+
+
+    def test_6_jeton_de_lecture(self):
+        os.environ["SOC_READ_TOKEN"] = "lecture-test"
+        try:
+            status, _ = self._get("/api/overview")
+            self.assertEqual(status, 401)
+            status, _ = self._get("/api/overview", token="mauvais")
+            self.assertEqual(status, 401)
+            status, ov = self._get("/api/overview", token="lecture-test")
+            self.assertEqual(status, 200)
+            self._post("/api/ingest", SNAPSHOT, token="jeton-test")
+            status, ov = self._get("/api/overview", token="lecture-test")
+            self.assertEqual(status, 200)
+            self.assertTrue(ov["ready"])
+            # la page HTML reste servie : c'est elle qui demande le jeton
+            status, page = self._get("/", raw=True)
+            self.assertEqual(status, 200)
+            self.assertIn("Jeton de lecture requis", page)
+        finally:
+            os.environ.pop("SOC_READ_TOKEN", None)
 
 
 class TestSummaryFreshness(unittest.TestCase):
