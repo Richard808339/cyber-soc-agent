@@ -7,24 +7,60 @@ on:
     branches: [ "main" ]
   schedule:
     - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+# Note: CodeQL a ete abandonne ici car la "code scanning" (GitHub Advanced
+# Security) n'est pas activee sur ce depot prive et n'est pas disponible
+# sans licence GHAS (erreur API : "Advanced security has not been purchased.").
+# Les scanners ci-dessous sont gratuits, sans token et fonctionnent sur un
+# depot prive.
+
+permissions:
+  contents: read
 
 jobs:
   analyze:
     name: Analyze Code Security
     runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      actions: read
-      contents: read
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        languages: 'python'
+        python-version: '3.12'
 
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+    - name: Install scanners
+      run: pip install --quiet bandit semgrep pip-audit
+
+    - name: Bandit (analyse statique Python)
+      run: |
+        bandit -r . -x ./.git,./.github -ll -f screen || true
+        bandit -r . -x ./.git,./.github -f sarif -o bandit.sarif || true
+
+    - name: Semgrep (regles communaute, sans token)
+      run: semgrep scan --config=p/default --config=p/python --sarif --output=semgrep.sarif
+
+    - name: pip-audit (dependances)
+      run: |
+        reqs=$(git ls-files | grep -E '(^|/)requirements.*\.txt$' || true)
+        if [ -z "$reqs" ]; then
+          echo "Aucun fichier requirements*.txt suivi par git - etape ignoree."
+          exit 0
+        fi
+        for f in $reqs; do
+          echo "=== $f ==="
+          pip-audit -r "$f" || true
+        done
+
+    - name: Publier les rapports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-reports
+        path: |
+          bandit.sarif
+          semgrep.sarif
+        if-no-files-found: warn
