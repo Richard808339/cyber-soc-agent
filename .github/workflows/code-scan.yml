@@ -9,12 +9,6 @@ on:
     - cron: '0 0 * * 0'
   workflow_dispatch:
 
-# Note: CodeQL a ete abandonne ici car la "code scanning" (GitHub Advanced
-# Security) n'est pas activee sur ce depot prive et n'est pas disponible
-# sans licence GHAS (erreur API : "Advanced security has not been purchased.").
-# Les scanners ci-dessous sont gratuits, sans token et fonctionnent sur un
-# depot prive.
-
 permissions:
   contents: read
 
@@ -22,13 +16,33 @@ jobs:
   analyze:
     name: Analyze Code Security
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3.39.1
+      with:
+        languages: 'python'
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3.39.1
+
+  static-scan:
+    name: Static Scan (Bandit + Semgrep + pip-audit)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
       with:
         python-version: '3.12'
 
@@ -57,7 +71,7 @@ jobs:
 
     - name: Publier les rapports
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: security-reports
         path: |
