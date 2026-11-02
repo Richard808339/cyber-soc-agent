@@ -41,6 +41,16 @@ if HERE not in sys.path:
 
 import playbooks  # noqa: E402
 
+try:
+    # Garde-fou optionnel : le collecteur ne fait que de la lecture, mais s'il
+    # venait a lancer une commande sensible elle serait arretee net.
+    # Desactivable avec SOC_SHIELD=0.
+    if os.environ.get("SOC_SHIELD", "1") != "0":
+        import shield
+        shield.install(agent="collector")
+except Exception as _exc:  # jamais bloquant pour la collecte
+    print("garde-fou indisponible :", _exc)
+
 try:  # console Windows : evite UnicodeEncodeError sur les accents
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
@@ -424,6 +434,15 @@ def main():
                 print("[%s] echec du push : %s: %s"
                       % (datetime.now().strftime("%H:%M:%S"), exc.__class__.__name__, str(exc)[:200]))
         if not args.loop:
+            # Apres chaque collecte : y a-t-il eu un redemarrage non trace ?
+            if not args.dump and os.environ.get("SOC_SHIELD", "1") != "0":
+                try:
+                    import broker
+                    res = broker.detect()
+                    for a in res.get("anomalies") or []:
+                        print("   ? conteneur %s : %s" % (a["conteneur"], a["constat"]))
+                except Exception as exc:
+                    print("   ? controle de contournement indisponible : %s" % str(exc)[:120])
             break
         time.sleep(args.loop)
 

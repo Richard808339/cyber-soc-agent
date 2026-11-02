@@ -28,6 +28,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -86,10 +87,51 @@ SAFE = [
 ]
 
 
+WRAPPER = re.compile(
+    r"^(?:sh|bash|zsh|dash|cmd|powershell|pwsh)(?:\.exe)?\s+(?:-c|-command|/c|/k|-Command)\s+(.+)$",
+    re.IGNORECASE)
+
+
+def normalize(action, profondeur=0):
+    """Retire les enveloppes qui cachent la vraie commande.
+
+    `wsl -d wazuh -e docker rm x` et `wsl -e sh -c "docker rm x"` doivent etre
+    classes comme `docker rm x`, sinon la politique s'applique a l'enveloppe et
+    laisse passer l'action reelle.
+    """
+    texte = (action or "").strip()
+    if profondeur > 3:
+        return texte
+    m = re.match(r"^wsl(?:\.exe)?\s+(?:-d\s+\S+\s+|--distribution\s+\S+\s+)?"
+                 r"(?:-e|--exec|--)?\s*(.+)$", texte, re.IGNORECASE)
+    if m and m.group(1):
+        return normalize(m.group(1).strip(), profondeur + 1)
+    m = WRAPPER.match(texte)
+    if m and m.group(1):
+        interieur = m.group(1).strip().strip('"').strip("'").strip()
+        return normalize(interieur, profondeur + 1)
+    return texte
+
+
+def build_argv(action):
+    """Decoupe en argv pour une execution SANS shell. Retourne (argv, erreur)."""
+    texte = (action or "").strip()
+    if not texte:
+        return None, "commande vide"
+    dangereux = re.search(r"[;&|<>`]|\$\(|\$\{|\n|\r", texte)
+    if dangereux:
+        return None, "metacaractere de shell refuse (%r)" % dangereux.group(0)
+    try:
+        argv = [t.strip('"').strip("'") for t in shlex.split(texte, posix=False)]
+    except ValueError as exc:
+        return None, "commande illisible : %s" % exc
+    return [a for a in argv if a != ""], None
+
+
 def classify(action):
     """Retourne (risque, motif). risque=None si l'action ne demande pas d'accord."""
     texte = (action or "").strip()
-    low = texte.lower()
+    low = normalize(texte).lower()
     for motif in SAFE:
         if re.search(motif, low):
             return None, None
@@ -415,11 +457,141 @@ def watch(poll_seconds=2):
         time.sleep(poll_seconds)
 
 
+def containers_uptime(distro=None):
+    """Etat des conteneurs : {nom: (running, epoch du demarrage)}.
+
+    On lit `.State.StartedAt` et non `Up 3 hours` : la duree affichee par docker
+    est tronquee a l'heure pres, donc la date de demarrage derive d'une heure
+    d'un relevé a l'autre et produit de fausses alertes.
+    """
+    distro = distro or os.environ.get("SOC_WSL_DISTRO", "wazuh")
+    base = ["wsl", "-d", distro, "-e", "docker"]
+    try:
+        noms = subprocess.run(base + ["ps", "-a", "--format", "{{.Names}}"],
+                              capture_output=True, text=True, timeout=60,
+                              encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return {}, str(exc)
+    if noms.returncode != 0:
+        return {}, (noms.stderr or "").strip()[:300]
+    liste = [n.strip() for n in (noms.stdout or "").splitlines() if n.strip()]
+    if not liste:
+        return {}, None
+    try:
+        infos = subprocess.run(base + ["inspect", "--format",
+                                       "{{.Name}}|{{.State.Running}}|{{.State.StartedAt}}"] + liste,
+                               capture_output=True, text=True, timeout=90,
+                               encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return {}, str(exc)
+    if infos.returncode != 0:
+        return {}, (infos.stderr or "").strip()[:300]
+
+    resultat = {}
+    for ligne in (infos.stdout or "").splitlines():
+        morceaux = ligne.split("|")
+        if len(morceaux) != 3:
+            continue
+        nom, running, demarre = morceaux
+        try:
+            propre = demarre.strip().split(".")[0].replace("Z", "+00:00")
+            epoch = datetime.fromisoformat(propre).replace(tzinfo=timezone.utc).timestamp()
+        except Exception:
+            epoch = 0.0
+        resultat[nom.strip().lstrip("/")] = (running.strip().lower() == "true", epoch)
+    return resultat, None
+
+
+def detect(lookback_seconds=1800, notify=True):
+    """Detecte un redemarrage de conteneur sans autorisation enregistree.
+
+    Un broker contournable reste utile si l'effet est visible : ici on compare
+    l'heure de demarrage reelle des conteneurs a la derniere photo connue, et on
+    cherche une approbation executee dans la fenetre. Rien trouve = anomalie.
+    """
+    etat, erreur = containers_uptime()
+    if erreur:
+        return {"ok": False, "erreur": erreur[:200], "anomalies": []}
+    maintenant = time.time()
+    base = {}
+    try:
+        base = json.loads(_state_get("containers_baseline", "{}") or "{}")
+    except Exception:
+        base = {}
+
+    anomalies = []
+    premiere_photo = not base
+    for nom, (running, demarrage) in etat.items():
+        precedent = base.get(nom)
+        if running and precedent and demarrage > float(precedent) + 5:
+            autorise = False
+            fenetre = datetime.fromtimestamp(max(demarrage - 120, 0), timezone.utc)
+            with connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, action, executed_at FROM approvals "
+                    "WHERE status='executed' AND executed_at > ?", (_iso(fenetre),)).fetchall()
+            for r in rows:
+                if nom in (r["action"] or ""):
+                    autorise = True
+                    break
+            if not autorise:
+                anomalies.append({
+                    "conteneur": nom,
+                    "demarre_il_y_a_s": max(int(maintenant - demarrage), 0),
+                    "constat": "redemarrage sans trace d'autorisation (crash ou action manuelle)",
+                })
+        if running:
+            base[nom] = demarrage
+
+    with connect() as conn:
+        _state_set("containers_baseline", json.dumps(base))
+        if anomalies:
+            audit(conn, None, "anomalie_contournement", "detect",
+                  "; ".join(a["conteneur"] for a in anomalies))
+
+    if anomalies and notify:
+        try:
+            lignes = ["<b>[ALERTE] action hors broker</b>", ""]
+            for a in anomalies:
+                lignes.append("• <code>%s</code> — %s (demarre il y a %d s)"
+                              % (_e(a["conteneur"]), a["constat"], a["demarre_il_y_a_s"]))
+            lignes.append("")
+            lignes.append("Aucune approbation ne couvre ce redemarrage : action manuelle "
+                          "hors broker, ou crash du conteneur.")
+            tg("sendMessage", chat_id=credentials()[1], text="\n".join(lignes), parse_mode="HTML")
+        except Exception:
+            pass
+
+    return {"ok": True, "conteneurs": len(etat), "anomalies": anomalies,
+            "premiere_photo": premiere_photo}
+
+
 # --------------------------------------------------------------------------- #
 # Execution gardee
 # --------------------------------------------------------------------------- #
+def claim(code, actor="shield"):
+    """Consomme une approbation atomiquement, sans executer.
+
+    Utilise par le garde-fou en processus : l'appelant va lancer lui-meme la
+    commande, le broker ne doit pas la lancer une seconde fois.
+    """
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE approvals SET status='executed', executed_at=? "
+            "WHERE id=? AND status='approved'", (_iso(_now()), code))
+        if cur.rowcount != 1:
+            return False
+        audit(conn, code, "consommation", actor, "approbation utilisee par le garde-fou")
+    return True
+
+
 def execute(code, shell=False):
-    """Execute l'action approuvee et enregistre le resultat."""
+    """Execute l'action approuvee et enregistre le resultat.
+
+    Execution sans shell (subprocess shell=False) : la commande approuvee est
+    celle qui tourne, un `;` ou un `|` glisse dans la chaine ne peut pas ajouter
+    une seconde commande non approuvee.
+    """
     row = get(code)
     if not row:
         return False, "demande inconnue"
@@ -427,9 +599,16 @@ def execute(code, shell=False):
         return False, "statut %s : execution refusee" % row["status"]
     if row.get("executed_at"):
         return False, "deja executee"
+    argv, erreur = build_argv(row["action"])
+    if erreur or not argv:
+        with connect() as conn:
+            conn.execute("UPDATE approvals SET status='denied', decided_at=?, decided_by='broker', "
+                         "result=? WHERE id=?", (_iso(_now()), erreur or "argv vide", code))
+            audit(conn, code, "execution_refusee", "broker", erreur or "argv vide")
+        return False, "execution refusee : %s" % (erreur or "argv vide")
     try:
-        proc = subprocess.run(row["action"], shell=True, capture_output=True,
-                              text=True, timeout=120, encoding="utf-8", errors="replace")
+        proc = subprocess.run(argv, shell=False, capture_output=True, text=True,
+                              timeout=180, encoding="utf-8", errors="replace")
         sortie = ((proc.stdout or "") + (proc.stderr or "")).strip()[:2000]
         code_retour = proc.returncode
     except Exception as exc:
@@ -437,7 +616,7 @@ def execute(code, shell=False):
     with connect() as conn:
         conn.execute("UPDATE approvals SET status='executed', executed_at=?, result=? WHERE id=?",
                      (_iso(_now()), "code=%s | %s" % (code_retour, sortie[:1500]), code))
-        audit(conn, code, "execution", "broker", "code=%s" % code_retour)
+        audit(conn, code, "execution", "broker", "code=%s | %s" % (code_retour, " ".join(argv)[:120]))
     return True, sortie
 
 
@@ -486,8 +665,12 @@ def guard(action, agent="agent-soc", details="", execute_it=False, ttl=None):
 
 
 def execute_raw(action):
-    proc = subprocess.run(action, shell=True, capture_output=True, text=True,
-                          timeout=120, encoding="utf-8", errors="replace")
+    """Execution directe d'une action non sensible, sans shell."""
+    argv, erreur = build_argv(action)
+    if erreur or not argv:
+        return {"status": "refused", "output": erreur or "argv vide"}
+    proc = subprocess.run(argv, shell=False, capture_output=True, text=True,
+                          timeout=180, encoding="utf-8", errors="replace")
     return {"status": "executed", "code": proc.returncode,
             "output": ((proc.stdout or "") + (proc.stderr or ""))[:2000]}
 
@@ -526,6 +709,9 @@ def main():
     p.add_argument("--ttl", type=int, default=None)
 
     sub.add_parser("watch", help="ecouter Telegram en continu")
+
+    p = sub.add_parser("detect", help="detecter une action faite hors du broker")
+    p.add_argument("--no-notify", action="store_true")
     p = sub.add_parser("audit", help="journal des decisions")
     p.add_argument("--limit", type=int, default=20)
 
@@ -559,6 +745,8 @@ def main():
                          ensure_ascii=False))
     elif args.cmd == "watch":
         watch()
+    elif args.cmd == "detect":
+        print(json.dumps(detect(notify=not args.no_notify), ensure_ascii=False, indent=2))
     elif args.cmd == "audit":
         with connect() as conn:
             rows = conn.execute("SELECT * FROM approval_audit ORDER BY id DESC LIMIT ?",

@@ -209,6 +209,52 @@ Demarrage de l'utilisateur), journal dans `logs/broker.log`. Sans lui, les
 boutons restent sans effet (Telegram conserve les appuis, il les traitera au
 prochain demarrage).
 
+### Contournements couverts
+
+- **Enveloppes** : `wsl -d wazuh -e docker rm x`, `wsl -e sh -c "docker rm x"`,
+  `cmd /c "del /s ..."` -> c'est la commande *interne* qui est classee. Sans
+  cela, toute action reelle sur la pile passait pour une commande inconnue.
+- **Injection dans une commande approuvee** : execution `shell=False` sur un
+  argv deja decoupe, metacharacteres (`;`, `&&`, `|`, `<`, `>`, accents graves,
+  `$(...)`) refuses. Une commande approuvee ne peut pas en embarquer une autre.
+- **Approbation reutilisee** : consommation atomique, une approbation = une
+  execution. Une approbation qui ne correspond pas exactement a la commande est
+  refusee.
+- **Chat tiers** : seule la conversation configuree peut decider.
+
+### Garde-fou en cours de processus (`shield.py`)
+
+Le broker ne protege que le code qui l'appelle ; `shield` remplace `subprocess`
+et `os.system` dans le processus courant et bloque les commandes sensibles
+non approuvees, meme si le script ignore l'existence du broker.
+
+```python
+import shield
+shield.install(agent="mon-agent")     # en tete du script
+```
+
+Approbation prealable : `SOC_APPROVAL_ID=<id> python mon_script.py` (consommee
+une seule fois, et seulement si la commande correspond exactement).
+Le collecteur l'active par defaut (`SOC_SHIELD=0` pour couper).
+
+### Detection d'une action faite hors du broker
+
+`python broker.py detect` compare la date de demarrage reelle des conteneurs
+(`.State.StartedAt`, pas `Up 3 hours` qui derive) a la photo precedente : si un
+conteneur a redemarre sans approbation enregistree, alerte Telegram + journal.
+Lance a chaque collecte par le collecteur. Cela detecte le contournement, cela
+ne l'empeche pas.
+
+### Ce qui reste ouvert
+
+- Enforcement systeme (AppLocker/WDAC, compte dedie, shim devant le binaire
+  `docker` dans la distro) : non installe, cela demande des droits admin et,
+  pour le shim, un test soigne pour ne pas casser la pile Wazuh.
+- Une commande approuvee s'execute avec les droits de l'utilisateur, sans
+  sandbox : l'approbation est la seule barriere.
+- `shield` couvre Python dans ce processus ; un binaire lance autrement passe
+  a cote — c'est ce que `detect` rattrape apres coup.
+
 ## Diagnostic du SOC
 
 Le collecteur lit aussi l'état de la pile (conteneurs Docker de la distro WSL,

