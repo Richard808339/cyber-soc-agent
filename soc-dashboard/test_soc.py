@@ -142,15 +142,17 @@ class TestStoreAndApi(unittest.TestCase):
         self.httpd.server_close()
         socstore.DB_PATH = os.path.join(HERE, "soc.db")
 
-    def _get(self, path, token=None):
+    def _get(self, path, token=None, raw=False):
         req = urllib.request.Request(self.base + path)
         if token:
             req.add_header("X-SOC-Token", token)
         try:
             with urllib.request.urlopen(req, timeout=10) as r:
-                return r.status, json.loads(r.read().decode("utf-8"))
+                body = r.read().decode("utf-8", "replace")
+                return r.status, (body if raw else json.loads(body))
         except urllib.error.HTTPError as exc:
-            return exc.code, json.loads(exc.read().decode("utf-8"))
+            body = exc.read().decode("utf-8", "replace")
+            return exc.code, (body if raw else json.loads(body))
 
     def _post(self, path, body, token=None):
         req = urllib.request.Request(self.base + path, data=json.dumps(body).encode("utf-8"), method="POST")
@@ -207,6 +209,17 @@ class TestStoreAndApi(unittest.TestCase):
         self.assertEqual(r.status, 200)
         self.assertIn("Tableau de bord", html)
         self.assertIn("/api/overview", html)
+
+    def test_5_traversee_de_chemin_refusee(self):
+        status, page = self._get("/static/index.html", raw=True)
+        self.assertEqual(status, 200)
+        self.assertIn("Tableau de bord", page)
+        for mauvais in ("/static/../app.py", "/static/%2e%2e%2fapp.py",
+                        "/static/..%2fapp.py", "/static/..%5capp.py",
+                        "/static/%2e%2e/%2e%2e/socstore.py"):
+            status, body = self._get(mauvais, raw=True)
+            self.assertIn(status, (403, 404), mauvais)
+            self.assertNotIn("SOC_INGEST_TOKEN", body)
 
 
 class TestSummaryFreshness(unittest.TestCase):

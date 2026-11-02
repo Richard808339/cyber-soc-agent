@@ -15,7 +15,9 @@ import hmac
 import json
 import mimetypes
 import os
+import re
 import sys
+import urllib.parse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -83,6 +85,22 @@ def _summary_is_stale(last, snapshot, force=False):
     return False
 
 
+def static_path(rel):
+    """Resout un chemin sous static/ et refuse toute sortie du dossier.
+
+    Retourne None si le chemin demande sort de STATIC_DIR apres normalisation
+    (traversee par '..' ou par encodage %2e%2e).
+    """
+    rel = urllib.parse.unquote(rel).replace("\\", "/").lstrip("/")
+    if not rel:
+        return None
+    root = os.path.realpath(STATIC_DIR)
+    candidate = os.path.realpath(os.path.join(root, rel))
+    if candidate == root or not candidate.startswith(root + os.sep):
+        return None
+    return candidate
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "SocDashboard/1.0"
 
@@ -97,9 +115,14 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_file(self, path):
-        if not os.path.isfile(path):
-            return self._send_json({"error": "introuvable", "path": path}, 404)
+        if not path or not os.path.isfile(path):
+            return self._send_json({"error": "introuvable"}, 404)
         ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        ctype = ctype.split(";")[0].strip()
+        # Liste blanche stricte : aucune valeur derivee de l'URL ne doit atterrir
+        # telle quelle dans un en-tete (injection CRLF / response splitting).
+        if not re.fullmatch(r"[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+", ctype):
+            ctype = "application/octet-stream"
         if ctype.startswith("text/") or ctype in ("application/javascript", "application/json"):
             ctype += "; charset=utf-8"
         with open(path, "rb") as fh:
@@ -142,8 +165,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_file(os.path.join(STATIC_DIR, "index.html"))
 
         if path.startswith("/static/"):
-            rel = path[len("/static/"):].replace("..", "")
-            return self._send_file(os.path.join(STATIC_DIR, rel))
+            resolved = static_path(path[len("/static/"):])
+            if resolved is None:
+                return self._send_json({"error": "chemin refuse"}, 403)
+            return self._send_file(resolved)
 
         if path == "/favicon.ico":
             self.send_response(204)
