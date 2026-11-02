@@ -255,6 +255,51 @@ ne l'empeche pas.
 - `shield` couvre Python dans ce processus ; un binaire lance autrement passe
   a cote — c'est ce que `detect` rattrape apres coup.
 
+### Verrou cote WSL : shim `docker`
+
+Le broker ne protege que ce qui passe par lui. Pour la pile reelle, le verrou
+est place devant le binaire : `/usr/local/bin/docker` intercepte les commandes
+et laisse passer les lectures, mais exige une approbation pour les destructrices.
+
+```bash
+wsl -d wazuh -e sh /mnt/c/Users/HP/Documents/security/soc-dashboard/tools/install-docker-shim.sh
+# desinstallation
+wsl -d wazuh -e rm /usr/local/bin/docker
+```
+
+- Bloque : `rm`, `rmi`, `stop`, `kill`, `restart`, `pause`, `unpause`, `prune`,
+  `system prune`, `compose|stack down|stop|rm|kill|restart`, `container|volume|
+  network|image rm|prune`.
+- Laisse passer : `ps`, `logs`, `inspect`, `stats`, `compose ps`, `compose up`.
+- Sans approbation : refus immediat (code 126) avec la marche a suivre.
+- Avec `SOC_APPROVAL_ID=<id>` : l'approbation est verifiee contre la base du
+  broker (action normalisee identique), consommee une fois, puis la commande
+  part au vrai `/usr/bin/docker`. Journal : `/var/log/soc-docker-shim.log`.
+
+Verifie en conditions reelles : `docker ps` et `docker logs` passent, la collecte
+du SOC continue (HTTP 202), `docker rm -f ...` est refuse sans approbation,
+autorise une seule fois avec une approbation valide, puis refuse au rejeu.
+
+Limite : tu es root dans la distro, donc `/usr/bin/docker` et ce fichier restent
+modifiables. Un agent qui appelle le binaire reel passe outre — c'est ce que
+`broker.py detect` signale apres coup. AppLocker et App Control for Business,
+qui fermeraient vraiment cette porte, sont reserves aux editions Windows
+Entreprise/Education : ce poste est en Windows 11 Pro, donc indisponibles sans
+changement d'edition.
+
+### Point de situation quotidien
+
+```bash
+python daily_digest.py            # envoie le bilan du moment sur Telegram
+python daily_digest.py --dry-run  # affiche sans envoyer
+python daily_digest.py --mock     # verifie le rendu sur des donnees simulees
+```
+
+Chiffres cles, phrase de bilan, points ouverts. Le script interroge Wazuh
+lui-meme : le tableau de bord peut etre arrete, le bilan part quand meme.
+Automatise par la tache planifiee `SOC Bilan Quotidien` (08:00, chaque jour),
+lancee en silence par `run-digest.vbs`, journal dans `logs/digest.log`.
+
 ## Diagnostic du SOC
 
 Le collecteur lit aussi l'état de la pile (conteneurs Docker de la distro WSL,
