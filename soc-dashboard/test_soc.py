@@ -392,8 +392,20 @@ class TestNotifier(unittest.TestCase):
 
     def test_message_bilan(self):
         msg = self.notifier.build_digest_message(self.snap, "## Situation en une phrase\nSur les 24 dernieres heures, 959 alertes.")
-        self.assertIn("Bilan SOC", msg)
+        self.assertIn("[SOC] Bilan", msg)
         self.assertIn("959", msg)
+
+    def test_messages_lisibles_sans_emoji(self):
+        """Un emoji s'affiche en '??' sur certains clients : les messages doivent
+        rester lisibles en ASCII etendu (tags de severite)."""
+        alertes = self.notifier.build_alert_message(
+            self.snap, [{"level": "critique", "title": "Conteneur arrete", "actions": ["docker start x"]}])
+        sain = self.notifier.build_alert_message(self.snap, [])
+        bilan = self.notifier.build_digest_message(self.snap, "Sur les 24 heures, 959 alertes.")
+        for msg in (alertes, sain, bilan):
+            hors_ascii = {c for c in msg if ord(c) > 0x2200}
+            self.assertFalse(hors_ascii, "caractères à risque : %r" % hors_ascii)
+        self.assertIn("[CRITIQUE]", alertes)
 
 
 class TestSummaryFreshness(unittest.TestCase):

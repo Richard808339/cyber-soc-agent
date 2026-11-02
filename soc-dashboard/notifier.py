@@ -42,7 +42,9 @@ except Exception:
     pass
 
 API = "https://api.telegram.org/bot%s/sendMessage"
-LEVEL_ICON = {"critique": "🔴", "eleve": "🟠", "moyen": "🟡", "faible": "⚪"}
+# Marqueurs ASCII plutot qu'emoji : un emoji s'affiche "??" sur certains clients,
+# terminaux ou copier-coller, et une alerte illisible ne sert a rien.
+LEVEL_TAG = {"critique": "[CRITIQUE]", "eleve": "[ÉLEVÉ]", "moyen": "[MOYEN]", "faible": "[INFO]"}
 
 
 def load_dotenv(path=None):
@@ -101,17 +103,17 @@ def build_alert_message(snapshot, findings, dashboard_url=None):
     high = [f for f in findings if f.get("level") == "eleve"]
     others = [f for f in findings if f.get("level") not in ("critique", "eleve")]
 
-    head = "🔴 <b>SOC — %d constat(s) critique(s)</b>" % len(crit) if crit else \
-           "🟠 <b>SOC — %d constat(s) élevé(s)</b>" % len(high) if high else \
-           "🟡 <b>SOC — %d point(s) à surveiller</b>" % len(others) if others else \
-           "🟢 <b>SOC — rien à signaler</b>"
+    head = "[SOC] %d constat(s) critique(s) — action requise" % len(crit) if crit else \
+           "[SOC] %d constat(s) élevé(s) à vérifier" % len(high) if high else \
+           "[SOC] %d point(s) à surveiller" % len(others) if others else \
+           "[SOC] rien à signaler"
 
-    lignes = [head, ""]
+    lignes = ["<b>%s</b>" % _e(head), ""]
     lignes.append("%d/%d poste(s) actif(s) · %d alerte(s)/24 h · score %d/100"
                   % (m["agents_active"], m["agents_total"], m["alerts_24h"], m["score"]))
     stack = snapshot.get("stack") or {}
     if stack.get("containers"):
-        etat = "arret(s) : " + ", ".join(m["stack_down"]) if m.get("stack_down") else "tous démarrés"
+        etat = "arrêt(s) : " + ", ".join(m["stack_down"]) if m.get("stack_down") else "tous démarrés"
         lignes.append("Pile : %d conteneur(s), %s, indexeur %s"
                       % (len(stack["containers"]), etat, stack.get("indexer_health") or "?"))
 
@@ -121,7 +123,7 @@ def build_alert_message(snapshot, findings, dashboard_url=None):
         lignes.append("")
         lignes.append("<b>%s</b>" % titre)
         for f in bloc[:4]:
-            lignes.append("%s %s" % (LEVEL_ICON.get(f.get("level"), "•"), _e(f.get("title"))))
+            lignes.append("%s %s" % (LEVEL_TAG.get(f.get("level"), "[INFO]"), _e(f.get("title"))))
             premiere = (f.get("actions") or [None])[0]
             if premiere:
                 lignes.append("   <code>%s</code>" % _e(premiere)[:180])
@@ -140,7 +142,7 @@ def build_alert_message(snapshot, findings, dashboard_url=None):
 def build_digest_message(snapshot, summary_text, dashboard_url=None):
     """Message de bilan : version courte du bilan redige."""
     m = summarizer.compute_metrics(snapshot)
-    lignes = ["📊 <b>Bilan SOC</b>", ""]
+    lignes = ["<b>[SOC] Bilan</b>", ""]
     lignes.append("%d/%d poste(s) actif(s) · %d alerte(s)/24 h · %d critique(s) · score %d/100"
                   % (m["agents_active"], m["agents_total"], m["alerts_24h"],
                      m["alerts_critique"], m["score"]))
