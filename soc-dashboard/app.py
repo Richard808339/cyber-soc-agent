@@ -24,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import playbooks  # noqa: E402
+import notifier  # noqa: E402
 import socstore  # noqa: E402
 import summarizer  # noqa: E402
 
@@ -267,6 +268,15 @@ class Handler(BaseHTTPRequestHandler):
                     socstore.save_summary(self._build_summary(payload))
                 except Exception as exc:
                     print("bilan non genere :", exc)
+
+            # Notification Telegram si un constat grave apparait (jamais bloquant).
+            try:
+                res = notifier.maybe_notify(payload, summarizer.findings(payload),
+                                            os.environ.get("SOC_PUBLIC_URL") or None)
+                if res.get("sent"):
+                    print("notification Telegram envoyee (message_id=%s)" % res.get("message_id"))
+            except Exception as exc:
+                print("notification impossible :", exc)
 
             return self._send_json({
                 "ok": True, "bytes": nbytes,

@@ -140,6 +140,37 @@ Les requêtes d'indexeur du catalogue ont été testées sur l'indexeur réel.
 - Le dépôt est public : les données SOC réelles doivent rester dans `soc.db`, pas
   dans des fichiers suivis par git.
 
+## Notifications Telegram
+
+Le tableau de bord pousse vers le bot Telegram (@CyberSOC_Agent68_bot) dès qu'un
+constat **critique** ou **élevé** apparaît : conteneur arrêté, API Wazuh muette,
+poste injoignable, indexeur rouge, refus d'enrôlement massif. Rien n'est envoyé
+quand tout va bien, ce qui évite le bruit qui rend un canal d'alerte inutile.
+
+```
+.env :  SOC_TELEGRAM_TOKEN=<jeton du bot>
+        SOC_TELEGRAM_CHAT_ID=<destinataire>
+        SOC_NOTIFY=1                  (0 = coupe les notifications)
+        SOC_NOTIFY_COOLDOWN=900       (anti-doublon : pas deux fois le même constat en 15 min)
+        SOC_PUBLIC_URL=http://...     (lien ajouté au message, optionnel)
+```
+
+Commandes :
+
+```bash
+python notifier.py --test        # message de vérification (prouve que le bot est relié)
+python notifier.py --digest      # bilan courant formaté pour Telegram
+python notifier.py --dry-run     # affiche le message sans l'envoyer
+```
+
+Le message contient les chiffres clés (postes actifs, alertes 24 h, score), l'état
+de la pile, puis les constats avec la première action à lancer en police monospace.
+`notifier.py` n'utilise que `urllib` : aucune dépendance.
+
+L'anti-doublon est stocké en base (`notifications`) : deux collectes successives avec
+le même constat ne produisent qu'un seul message. Vérifié sur une instance isolée :
+2 ingestions dégradées → 1 seul message (message_id 39).
+
 ## Diagnostic du SOC
 
 Le collecteur lit aussi l'état de la pile (conteneurs Docker de la distro WSL,

@@ -326,6 +326,76 @@ class TestFindings(unittest.TestCase):
         self.assertTrue(any("non inspectable" in x["title"] for x in f))
 
 
+class TestNotifier(unittest.TestCase):
+    """Messages Telegram : contenu, seuil d'alerte, anti-doublon. Aucun envoi reel."""
+
+    def setUp(self):
+        import notifier
+        self.notifier = notifier
+        self.tmp = tempfile.mkdtemp(prefix="socnotif-")
+        socstore.DB_PATH = os.path.join(self.tmp, "n.db")
+        socstore.init()
+        self.snap = {
+            "collected_at": "2026-11-02T20:42:00+00:00",
+            "agents": [{"name": "zbook-hp", "status": "active"}],
+            "alerts": {"total_24h": 959, "by_level": {"3": 950, "12": 2}},
+            "stack": {"available": True, "indexer_health": "green", "enrollment_rejected_30m": 0,
+                      "containers": [{"name": "m", "status": "Up"}]},
+            "vulnerabilities": {"total": 1, "by_severity": {"Critical": 0}},
+            "errors": [],
+        }
+
+    def test_message_alerte_contient_chiffres_et_action(self):
+        findings = [{"level": "critique", "title": "Conteneur arrete : indexer-1",
+                     "actions": ["docker start indexer-1"]}]
+        msg = self.notifier.build_alert_message(self.snap, findings)
+        self.assertIn("critique", msg)
+        self.assertIn("959", msg)
+        self.assertIn("indexer-1", msg)
+        self.assertIn("docker start indexer-1", msg)
+        self.assertIn("96/100" if "96/100" in msg else "score", msg)
+
+    def test_message_sain(self):
+        msg = self.notifier.build_alert_message(self.snap, [])
+        self.assertIn("rien à signaler", msg)
+        self.assertIn("Aucun constat bloquant", msg)
+
+    def test_seuil_alerte(self):
+        ok, cle = self.notifier.should_alert([{"level": "moyen", "title": "Indexeur yellow"}], 900)
+        self.assertFalse(ok)
+        ok, cle = self.notifier.should_alert([{"level": "critique", "title": "Conteneur arrete"}], 900)
+        self.assertTrue(ok)
+
+    def test_anti_doublon(self):
+        findings = [{"level": "critique", "title": "Conteneur arrete : indexer-1"}]
+        ok1, cle = self.notifier.should_alert(findings, 900)
+        self.assertTrue(ok1)
+        socstore.mark_notified(cle)
+        ok2, _ = self.notifier.should_alert(findings, 900)
+        self.assertFalse(ok2, "le meme constat ne doit pas etre renvoye dans la fenetre de cooldown")
+
+    def test_notifications_desactivees(self):
+        os.environ["SOC_NOTIFY"] = "0"
+        try:
+            res = self.notifier.maybe_notify(self.snap, [{"level": "critique", "title": "x"}])
+        finally:
+            os.environ.pop("SOC_NOTIFY", None)
+        self.assertFalse(res["sent"])
+        self.assertIn("desactivees", res["reason"])
+
+    def test_sans_identifiants_pas_d_envoi(self):
+        os.environ.pop("SOC_TELEGRAM_TOKEN", None)
+        os.environ.pop("SOC_TELEGRAM_CHAT_ID", None)
+        res = self.notifier.maybe_notify(self.snap, [{"level": "critique", "title": "x"}])
+        self.assertFalse(res["sent"])
+        self.assertIn("absents", res["reason"])
+
+    def test_message_bilan(self):
+        msg = self.notifier.build_digest_message(self.snap, "## Situation en une phrase\nSur les 24 dernieres heures, 959 alertes.")
+        self.assertIn("Bilan SOC", msg)
+        self.assertIn("959", msg)
+
+
 class TestSummaryFreshness(unittest.TestCase):
     """Un bilan ne doit jamais decrire des donnees plus anciennes que le dernier snapshot."""
 

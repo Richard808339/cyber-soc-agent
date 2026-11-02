@@ -51,6 +51,11 @@ CREATE TABLE IF NOT EXISTS ingest_log (
 
 CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(ts);
 CREATE INDEX IF NOT EXISTS idx_alerts_level ON alerts(level);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    key     TEXT PRIMARY KEY,
+    sent_at TEXT NOT NULL
+);
 """
 
 
@@ -200,6 +205,30 @@ def log_ingest(ok, nbytes=0, source="", detail=""):
         conn.execute(
             "INSERT INTO ingest_log (ts, ok, bytes, source, detail) VALUES (datetime('now'),?,?,?,?)",
             (1 if ok else 0, nbytes, source, detail[:300]),
+        )
+
+
+def recently_notified(key, cooldown_seconds):
+    """Vrai si la meme notification a deja ete envoyee il y a moins de N secondes."""
+    with connect() as conn:
+        row = conn.execute("SELECT sent_at FROM notifications WHERE key = ?", (key,)).fetchone()
+        if not row:
+            return False
+        prev = conn.execute(
+            "SELECT (strftime('%s','now') - strftime('%s', ?)) AS dt", (row["sent_at"],)
+        ).fetchone()
+    try:
+        return int(prev["dt"]) < int(cooldown_seconds)
+    except Exception:
+        return False
+
+
+def mark_notified(key):
+    with _lock, connect() as conn:
+        conn.execute(
+            "INSERT INTO notifications (key, sent_at) VALUES (?, datetime('now')) "
+            "ON CONFLICT(key) DO UPDATE SET sent_at = datetime('now')",
+            (key,),
         )
 
 
