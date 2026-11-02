@@ -43,6 +43,7 @@ def compute_metrics(snapshot):
     alerts = snapshot.get("alerts") or {}
     agents = snapshot.get("agents") or []
     vulns = snapshot.get("vulnerabilities") or {}
+    stack = snapshot.get("stack") or {}
 
     by_level = alerts.get("by_level") or {}
     crit = sum(int(v) for k, v in by_level.items() if int(k) >= 12)
@@ -72,6 +73,10 @@ def compute_metrics(snapshot):
         "vulns_critique": crit_vulns,
         "manager_version": ((snapshot.get("manager") or {}).get("version") or "?"),
         "host": snapshot.get("host") or {},
+        "stack_containers": len(stack.get("containers") or []),
+        "stack_down": [c.get("name") for c in (stack.get("containers") or [])
+                       if not str(c.get("status") or "").lower().startswith("up")],
+        "indexer_health": stack.get("indexer_health"),
         "score": posture_score(len(active), len(agents), crit, crit_vulns),
     }
 
@@ -96,6 +101,119 @@ def _top_rules_sentence(metrics):
         label = r.get("key") or r.get("rule") or r.get("description") or "regle inconnue"
         parts.append("%s (%s alertes)" % (label, r.get("count")))
     return "Les regles les plus declenchees sont " + ", ".join(parts) + "."
+
+
+def findings(snapshot):
+    """Diagnostic automatique du SOC : ce qui empeche de voir ou de detecter.
+
+    Chaque constat porte une preuve et des actions concretes. Aucune deduction
+    n'est faite sans donnee correspondante dans le snapshot.
+    """
+    out = []
+    alerts = snapshot.get("alerts") or {}
+    agents = snapshot.get("agents") or []
+    stack = snapshot.get("stack") or {}
+    errors = snapshot.get("errors") or []
+    total = int(alerts.get("total_24h") or 0)
+    down = [a for a in agents if (a.get("status") or "").lower() != "active"]
+
+    if any(str(e).startswith("agents:") for e in errors):
+        out.append({
+            "level": "critique",
+            "title": "API Wazuh muette : aucun poste lisible",
+            "detail": "La collecte n'a pas pu lire la liste des agents. Soit l'API du "
+                      "manager est arretee, soit le manager ne repond pas : le tableau de "
+                      "bord ne peut plus decrire le parc.",
+            "evidence": [e for e in errors if str(e).startswith("agents:")][0][:160],
+            "actions": [
+                "docker logs --tail 30 single-node-wazuh.manager-1 | grep -i apid",
+                "docker restart single-node-wazuh.manager-1 si l'API ne demarre pas",
+                "curl -sk -o /dev/null -w '%{http_code}' -u <user>:<pass> https://localhost:55000/security/user/authenticate",
+            ],
+        })
+    elif not agents:
+        out.append({
+            "level": "critique",
+            "title": "Aucun poste enregistre",
+            "detail": "Le manager repond mais ne connait aucun agent : enrolement perdu "
+                      "ou cluster vide.",
+            "evidence": "GET /agents -> liste vide",
+            "actions": ["Verifier l'enrolement des agents (port 1515)",
+                        "docker logs --since 1h single-node-wazuh.manager-1 | grep -i enroll"],
+        })
+
+    if total == 0:
+        out.append({
+            "level": "eleve",
+            "title": "Aucun signal sur 24 h",
+            "detail": "Zero alerte indexee sur 24 heures. Un SOC silencieux n'est pas un "
+                      "SOC sain : c'est le plus souvent un agent muet ou un indexeur qui "
+                      "n'ecrit plus.",
+            "evidence": "agregation timestamp >= now-24h sur wazuh-alerts-* : 0 document",
+            "actions": ["docker ps (les trois conteneurs doivent etre Up)",
+                        "Verifier le dernier keepalive des agents dans /agents",
+                        "Verifier _cluster/health de l'indexeur"],
+        })
+
+    if down:
+        out.append({
+            "level": "eleve",
+            "title": "Poste(s) injoignable(s) : %d" % len(down),
+            "detail": "Ces postes ne remontent plus rien : angle mort de la surveillance.",
+            "evidence": ", ".join("%s (%s)" % (a.get("name"), a.get("status")) for a in down),
+            "actions": ["Get-Service WazuhSvc sur le poste concerne",
+                        "Test-NetConnection -ComputerName <manager> -Port 1514",
+                        "Restart-Service WazuhSvc"],
+        })
+
+    health = stack.get("indexer_health")
+    if health and str(health).lower() != "green":
+        out.append({
+            "level": "eleve" if str(health).lower() == "red" else "moyen",
+            "title": "Indexeur en etat %s" % health,
+            "detail": "L'indexation n'est pas nominale : les alertes peuvent arriver en "
+                      "retard ou manquer.",
+            "evidence": "_cluster/health -> status=%s" % health,
+            "actions": ["curl -sk -u admin:<pass> https://localhost:9200/_cluster/health?pretty",
+                        "Verifier l'espace disque : df -h dans la distro WSL"],
+        })
+
+    for c in stack.get("containers") or []:
+        status = (c.get("status") or "").lower()
+        if not status.startswith("up"):
+            out.append({
+                "level": "critique",
+                "title": "Conteneur arrete : %s" % c.get("name"),
+                "detail": "Un composant de la pile Wazuh n'est pas en marche.",
+                "evidence": "%s -> %s" % (c.get("name"), c.get("status")),
+                "actions": ["docker start %s" % c.get("name"),
+                            "docker logs --tail 50 %s" % c.get("name")],
+            })
+
+    rejects = stack.get("enrollment_rejected_30m")
+    if rejects and rejects > 5:
+        out.append({
+            "level": "moyen",
+            "title": "Refus d'enrolement : %d en 30 min" % rejects,
+            "detail": "Des agents tentent de s'enregistrer et sont refuses : mot de passe "
+                      "d'agent different, ou tentative d'intrusion sur le port 1515.",
+            "evidence": "docker logs --since 30m <manager> | grep -c 'rejecting enrollment'",
+            "actions": ["Verifier le authd.pass cote agent",
+                        "Si la source est inconnue, filtrer le port 1515"],
+        })
+
+    if not stack.get("available"):
+        out.append({
+            "level": "moyen",
+            "title": "Pile Wazuh non inspectable depuis ce poste",
+            "detail": "Le collecteur n'a pas pu lire l'etat des conteneurs : diagnostic "
+                      "limite aux donnees API/indexeur.",
+            "evidence": str(stack.get("error") or "docker ps indisponible")[:160],
+            "actions": ["Verifier que wsl.exe -d <distro> docker ps repond",
+                        "Ajuster WAZUH_WSL_DISTRO / WAZUH_MANAGER_CONTAINER dans .env"],
+        })
+
+    return out
 
 
 def rules_summary(metrics):
@@ -142,6 +260,11 @@ def rules_summary(metrics):
     if metrics.get("top_sources"):
         srcs = ", ".join("%s (%s)" % (s.get("key"), s.get("count")) for s in metrics["top_sources"])
         lines.append("- Sources les plus actives dans les alertes : %s." % srcs)
+    if metrics.get("stack_containers"):
+        etat = "tous demarres" if not metrics.get("stack_down") else \
+            "arret(s) : " + ", ".join(metrics["stack_down"])
+        lines.append("- Pile Wazuh : %d conteneur(s), %s, indexeur %s."
+                     % (metrics["stack_containers"], etat, metrics.get("indexer_health") or "inconnu"))
 
     lines.append("")
     lines.append("## Priorites de reponse")

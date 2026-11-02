@@ -28,6 +28,7 @@ import os
 import platform
 import socket
 import ssl
+import subprocess
 import sys
 import time
 import urllib.error
@@ -230,6 +231,11 @@ class Indexer:
             "recent": recent[:40],
         }
 
+    def health(self):
+        """Etat du cluster d'indexation (green / yellow / red)."""
+        return http_json(self.base + "/_cluster/health", timeout=15,
+                         auth=(self.user, self.password))
+
     def vulnerabilities(self):
         body = {
             "query": {"match_all": {}},
@@ -249,6 +255,65 @@ class Indexer:
             "by_agent": [{"key": b["key"], "count": b["doc_count"]}
                          for b in (aggs.get("by_agent") or {}).get("buckets", [])],
         }
+
+
+# --------------------------------------------------------------------------- #
+# Etat de la pile Wazuh (conteneurs Docker dans WSL2 + sante de l'indexeur)
+# --------------------------------------------------------------------------- #
+def _wsl(script, timeout=40):
+    """Execute une commande dans la distro WSL qui heberge Wazuh (best effort)."""
+    if env("SOC_STACK_PROBE", "1") != "1":
+        return None
+    distro = env("WAZUH_WSL_DISTRO", "wazuh") or "wazuh"
+    try:
+        proc = subprocess.run(
+            ["wsl.exe", "-d", distro, "-e", "sh", "-c", script],
+            capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace",
+        )
+        return (proc.stdout or "").replace("\r", "")
+    except Exception:
+        return None
+
+
+def stack_status(indexer=None):
+    """Conteneurs de la pile, refus d'enrolement recents, sante de l'indexeur."""
+    out = {"available": False, "containers": [], "enrollment_rejected_30m": None,
+           "indexer_health": None, "error": None}
+
+    if indexer is not None:
+        try:
+            out["indexer_health"] = (indexer.health() or {}).get("status")
+        except Exception as exc:
+            out["error"] = "indexeur: %s" % str(exc)[:110]
+
+    manager = env("WAZUH_MANAGER_CONTAINER", "single-node-wazuh.manager-1") or "single-node-wazuh.manager-1"
+    script = (
+        'docker ps --format "{{.Names}}|{{.Status}}" 2>/dev/null; '
+        'echo "@@REJECTS@@"; '
+        'docker logs --since 30m %s 2>&1 | grep -c "rejecting enrollment"'
+        % manager
+    )
+    raw = _wsl(script)
+    if raw is None:
+        out["error"] = out["error"] or "WSL/Docker injoignable depuis ce poste"
+        return out
+
+    head, _, tail = raw.partition("@@REJECTS@@")
+    for line in head.splitlines():
+        if "|" not in line:
+            continue
+        name, _, status = line.partition("|")
+        if name.strip():
+            out["containers"].append({"name": name.strip(), "status": status.strip()})
+    try:
+        out["enrollment_rejected_30m"] = int((tail.strip() or "0").splitlines()[0])
+    except Exception:
+        out["enrollment_rejected_30m"] = None
+    out["available"] = bool(out["containers"])
+    if not out["available"]:
+        out["error"] = out["error"] or "docker ps n'a rien renvoye"
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -277,6 +342,7 @@ def build_snapshot():
         "agents": [],
         "alerts": {},
         "vulnerabilities": {},
+        "stack": {},
         "manager": {},
         "errors": [],
     }
@@ -313,6 +379,11 @@ def build_snapshot():
         snap["vulnerabilities"] = idx.vulnerabilities()
     except Exception as exc:
         snap["errors"].append("vulnerabilities: %s" % str(exc)[:160])
+
+    try:
+        snap["stack"] = stack_status(idx)
+    except Exception as exc:
+        snap["stack"] = {"available": False, "error": str(exc)[:160]}
 
     return snap
 

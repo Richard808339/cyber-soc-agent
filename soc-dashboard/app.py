@@ -319,6 +319,8 @@ class Handler(BaseHTTPRequestHandler):
             "top_sources": alerts.get("top_sources") or [],
             "top_mitre": alerts.get("top_mitre") or [],
             "vulnerabilities": snap.get("vulnerabilities") or {},
+            "stack": snap.get("stack") or {},
+            "findings": summarizer.findings(snap),
             "recent_alerts": socstore.query_alerts(limit=40),
             "alert_bank": stats,
             "summary": {

@@ -47,7 +47,7 @@ sécuriser et suffit ici.
 | `static/index.html` | interface (HTML/CSS/JS, aucun CDN) |
 | `llm_stub.py` | faux fournisseur LLM compatible OpenAI, pour vérifier le bilan sans clé |
 | `run-collector.bat` / `.vbs` | lancement silencieux du collecteur (tâche planifiée) |
-| `test_soc.py` | 20 tests : métriques, score, bilan (dont le chemin LLM), playbooks, jetons, API |
+| `test_soc.py` | 28 tests : métriques, score, diagnostic, bilan (dont le chemin LLM), playbooks, jetons, API |
 
 ## Démarrage
 
@@ -139,6 +139,27 @@ Les requêtes d'indexeur du catalogue ont été testées sur l'indexeur réel.
 - `.env` et `soc.db` sont ignorés par git ; ne jamais versionner les identifiants.
 - Le dépôt est public : les données SOC réelles doivent rester dans `soc.db`, pas
   dans des fichiers suivis par git.
+
+## Diagnostic du SOC
+
+Le collecteur lit aussi l'état de la pile (conteneurs Docker de la distro WSL,
+`_cluster/health` de l'indexeur, refus d'enrôlement des 30 dernières minutes).
+`summarizer.findings()` en tire des constats affichés en haut du tableau de bord,
+chacun avec sa preuve et ses actions :
+
+| Situation | Niveau |
+|---|---|
+| API Wazuh muette / aucun poste enregistré | critique |
+| Conteneur arrêté | critique |
+| Aucun signal sur 24 h | élevé |
+| Poste injoignable | élevé |
+| Indexeur en `red` (élevé) ou `yellow` (moyen) | élevé / moyen |
+| Refus d'enrôlement > 5 en 30 min | moyen |
+| Pile non inspectable depuis le poste | moyen |
+
+Principe : un SOC silencieux n'est pas un SOC sain. Le diagnostic distingue « rien à
+signaler » de « je ne vois plus rien », ce qui est le piège classique d'un tableau de
+bord qui affiche fièrement « 0 alerte ».
 
 ## Tests
 

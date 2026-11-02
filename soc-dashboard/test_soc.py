@@ -268,6 +268,64 @@ class TestStoreAndApi(unittest.TestCase):
             os.environ.pop("SOC_READ_TOKEN", None)
 
 
+class TestFindings(unittest.TestCase):
+    """Diagnostic automatique : chaque situation doit produire (ou non) le bon constat."""
+
+    def _snap(self, **over):
+        snap = {
+            "collected_at": "2026-11-02T19:20:00+00:00",
+            "agents": [{"id": "002", "name": "zbook-hp", "status": "active"}],
+            "alerts": {"total_24h": 100, "by_level": {"3": 100}},
+            "stack": {"available": True, "indexer_health": "green",
+                      "containers": [{"name": "single-node-wazuh.manager-1", "status": "Up 1 hour"}],
+                      "enrollment_rejected_30m": 0},
+            "errors": [],
+        }
+        snap.update(over)
+        return snap
+
+    def test_soc_sain_aucun_constat(self):
+        self.assertEqual(summarizer.findings(self._snap()), [])
+
+    def test_silence_24h(self):
+        titres = [f["title"] for f in summarizer.findings(self._snap(alerts={"total_24h": 0}))]
+        self.assertIn("Aucun signal sur 24 h", titres)
+
+    def test_api_muette(self):
+        f = summarizer.findings(self._snap(agents=[], errors=["agents: HTTPError: 401"]))
+        self.assertTrue(any("API Wazuh muette" in x["title"] for x in f))
+        self.assertTrue(any(x["actions"] for x in f))
+
+    def test_poste_injoignable(self):
+        f = summarizer.findings(self._snap(agents=[{"name": "poste-muet", "status": "disconnected"}]))
+        self.assertTrue(any("injoignable" in x["title"] for x in f))
+
+    def test_conteneur_arrete_est_critique(self):
+        f = summarizer.findings(self._snap(stack={
+            "available": True, "indexer_health": "green", "enrollment_rejected_30m": 0,
+            "containers": [{"name": "single-node-wazuh.indexer-1", "status": "Exited (1) 3 min ago"}],
+        }))
+        crit = [x for x in f if x["level"] == "critique"]
+        self.assertTrue(crit)
+        self.assertIn("indexer-1", crit[0]["title"])
+
+    def test_indexeur_rouge(self):
+        f = summarizer.findings(self._snap(stack={
+            "available": True, "indexer_health": "red", "enrollment_rejected_30m": 0, "containers": [],
+        }))
+        self.assertTrue(any("Indexeur" in x["title"] and x["level"] == "eleve" for x in f))
+
+    def test_enrolements_refuses(self):
+        f = summarizer.findings(self._snap(stack={
+            "available": True, "indexer_health": "green", "enrollment_rejected_30m": 42, "containers": [],
+        }))
+        self.assertTrue(any("enrolement" in x["title"] for x in f))
+
+    def test_pile_non_inspectable(self):
+        f = summarizer.findings(self._snap(stack={"available": False, "error": "WSL/Docker injoignable"}))
+        self.assertTrue(any("non inspectable" in x["title"] for x in f))
+
+
 class TestSummaryFreshness(unittest.TestCase):
     """Un bilan ne doit jamais decrire des donnees plus anciennes que le dernier snapshot."""
 

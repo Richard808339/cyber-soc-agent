@@ -96,6 +96,13 @@
        font-family:var(--mono);font-size:12.5px;color:#b7f7ff;white-space:pre-wrap;word-break:break-word;margin:6px 0 14px}
   .cmd button{position:absolute;top:6px;right:6px;padding:3px 8px;font-size:11px}
   .empty{color:var(--dim2);text-align:center;padding:26px}
+  .finding{display:grid;grid-template-columns:86px 1fr;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(30,42,56,.55)}
+  .finding:last-child{border-bottom:none}
+  .finding .t{font-weight:600;margin-bottom:3px}
+  .finding .d{color:#c3d3e3;font-size:13px}
+  .finding .ev{font-family:var(--mono);font-size:11.5px;color:var(--dim2);margin-top:5px;word-break:break-word}
+  .finding .ac{font-family:var(--mono);font-size:11.5px;color:#8ee7f5;margin-top:6px;padding-left:14px}
+  .finding .ac div:before{content:"› ";color:var(--dim2)}
   .err{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);color:#fca5a5;padding:10px 14px;
        border-radius:9px;margin-bottom:14px;font-size:12.5px;font-family:var(--mono)}
 </style>
@@ -115,6 +122,11 @@
   <div id="errors"></div>
 
   <div class="kpis" id="kpis"></div>
+
+  <div class="card" id="diagCard" style="display:none">
+    <h2>Diagnostic du SOC <span class="spacer"><span class="soft" id="diagHint"></span></span></h2>
+    <div class="body" style="padding:0" id="diag"></div>
+  </div>
 
   <div class="grid">
     <div>
@@ -292,9 +304,31 @@ function renderTopRules(o){
             <div class="bar" style="width:${Math.round(x.count/max*100)}%"></div></td></tr>`).join('') + '</table>';
 }
 
+function renderDiagnostics(o){
+  const f = o.findings || [];
+  $('#diagCard').style.display = f.length ? 'block' : 'none';
+  if(!f.length){ $('#diag').innerHTML = ''; return; }
+  $('#diagHint').textContent = f.length + ' constat(s)';
+  const cls = lvl => lvl === 'critique' ? 'crit' : lvl === 'eleve' ? 'high' : lvl === 'moyen' ? 'mid' : 'low';
+  $('#diag').innerHTML = f.map(x => `
+    <div class="finding">
+      <div><span class="pill ${cls(x.level)}">${esc(x.level)}</span></div>
+      <div>
+        <div class="t">${esc(x.title)}</div>
+        <div class="d">${esc(x.detail)}</div>
+        <div class="ev">preuve : ${esc(x.evidence || '—')}</div>
+        <div class="ac">${(x.actions || []).map(a => '<div>' + esc(a) + '</div>').join('')}</div>
+      </div>
+    </div>`).join('');
+}
+
 function renderAgents(o){
   const a = o.agents || [];
-  $('#agentsHint').textContent = a.length + ' enregistré(s)';
+  const st = o.stack || {};
+  const parts = [];
+  if(st.containers && st.containers.length) parts.push(st.containers.length + ' conteneur(s)');
+  if(st.indexer_health) parts.push('indexeur ' + st.indexer_health);
+  $('#agentsHint').textContent = a.length + ' enregistré(s)' + (parts.length ? ' · ' + parts.join(' · ') : '');
   if(!a.length){ $('#agents').innerHTML = '<div class="empty">Aucun poste remonté</div>'; return; }
   $('#agents').innerHTML = '<table><thead><tr><th>Poste</th><th>État</th><th>Système</th><th>Dernier contact</th><th>ID</th></tr></thead><tbody>' +
     a.map(x => {
@@ -386,7 +420,7 @@ function render(o){
   $('#collBadge').textContent = (o.collector && o.collector.host) ? 'collecte: ' + o.collector.host : '';
   $('#errors').innerHTML = (o.errors && o.errors.length)
     ? o.errors.map(e => '<div class="err">collecteur : ' + esc(e) + '</div>').join('') : '';
-  renderKpis(o); renderTimeline(o); renderTopRules(o); renderAgents(o);
+  renderKpis(o); renderDiagnostics(o); renderTimeline(o); renderTopRules(o); renderAgents(o);
   renderVulns(o); renderSummary(o); renderFeed(o);
 }
 
