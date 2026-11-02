@@ -1,0 +1,10 @@
+{
+  "headline": "SOC partiellement rétabli : poste en ligne, angle mort d'inventaire",
+  "bullets": [
+    "2 agents enregistrés, tous deux actifs : le manager (000) et le poste Windows zbook-hp (002). Le poste émet à nouveau après la panne de l'API wazuh-apid.",
+    "81 alertes sur 24 h, dont 2 de niveau >= 10 sur 7 jours : la capacité de détection commence à produire du signal, mais l'activité est récente (SOC redémarré aujourd'hui).",
+    "Angle mort principal : aucun index wazuh-states-inventory-*-zbook-hp. Pas d'inventaire paquets, ports ni OS, donc le module de vulnérabilités reste vide pour le poste.",
+    "Règle de lecture : les agents apparaissent en 127.0.0.1 parce que le relais WSL est devant, pas parce qu'ils tournent dans WSL. Filtrer sur agent.name, l'ID change au réenrôlement.",
+    "À traiter en premier : activer syscollector côté poste (ossec.conf + Restart-Service WazuhSvc), puis vérifier au bout d'un cycle d'une heure l'apparition de l'index d'inventaire."
+  ]
+}

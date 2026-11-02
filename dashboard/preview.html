@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOC KOFFI — tableau de bord</title>
+<style>
+  :root{
+    --fg: var(--foreground, #e8eaed);
+    --muted: var(--muted-foreground, #9aa0a6);
+    --border: var(--border, #2a2f36);
+    --card: var(--card, #14181d);
+    --accent: var(--accent, #4c9aff);
+    --ok:#2ecc71; --warn:#f1c40f; --bad:#e74c3c; --info:#7f8c8d;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:0;color:var(--fg);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.45;background:transparent}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px 16px 40px;text-align:left}
+  header{display:flex;flex-wrap:wrap;align-items:baseline;gap:12px;border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:16px}
+  h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+  .badge{font-size:11px;border:1px solid var(--border);border-radius:999px;padding:2px 9px;color:var(--muted)}
+  .spacer{flex:1}
+  button{background:transparent;color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+  .kpi{border:1px solid var(--border);border-radius:12px;padding:12px 14px;background:color-mix(in srgb,var(--card) 55%,transparent)}
+  .kpi .k{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted)}
+  .kpi .v{font-size:26px;font-weight:650;margin-top:4px;font-variant-numeric:tabular-nums}
+  .kpi .s{font-size:11px;color:var(--muted)}
+  .cols{display:grid;grid-template-columns:1.35fr .95fr;gap:14px}
+  @media(max-width:900px){.cols{grid-template-columns:1fr}}
+  .card{border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px;background:color-mix(in srgb,var(--card) 45%,transparent)}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:0 0 10px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:4px 6px;border-bottom:1px solid var(--border)}
+  td{padding:6px;border-bottom:1px solid color-mix(in srgb,var(--border) 45%,transparent)}
+  tr:last-child td{border-bottom:none}
+  .pill{display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,transparent)}
+  .pill.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 50%,transparent)}
+  .pill.mid{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 50%,transparent)}
+  .pill.mut{color:var(--muted);border-color:var(--border)}
+  .mark{font-weight:650}
+  .mark.ok{color:var(--ok)} .mark.bad{color:var(--bad)} .mark.mut{color:var(--muted)}
+  .bar{height:6px;border-radius:4px;background:color-mix(in srgb,var(--border) 70%,transparent);overflow:hidden}
+  .bar > i{display:block;height:100%;border-radius:4px}
+  .lvl{display:grid;grid-template-columns:34px 1fr 46px;gap:8px;align-items:center;margin:5px 0;font-size:12px;font-variant-numeric:tabular-nums}
+  .lvl .n{color:var(--muted);text-align:right}
+  .lvl .c{color:var(--muted);text-align:right}
+  ul.clean{list-style:none;padding:0;margin:0}
+  ul.clean li{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px solid color-mix(in srgb,var(--border) 40%,transparent);font-size:12.5px}
+  ul.clean li:last-child{border-bottom:none}
+  ul.clean li span:first-child{color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  ul.clean li span:last-child{color:var(--muted);font-variant-numeric:tabular-nums}
+  .summary p{margin:0 0 8px}
+  .summary ul{margin:0;padding-left:16px}
+  .summary li{margin:3px 0}
+  .finding{border-left:3px solid var(--border);padding:8px 0 8px 10px;margin-bottom:10px}
+  .finding.critique{border-color:var(--bad)}
+  .finding.majeur{border-color:var(--warn)}
+  .finding.info{border-color:var(--info)}
+  .finding .t{font-weight:600;font-size:13px}
+  .finding .d{color:var(--muted);font-size:12px;margin:3px 0 6px}
+  .finding .e{font-size:11px;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+  details{margin-top:6px}
+  summary{cursor:pointer;font-size:11.5px;color:var(--accent)}
+  pre{margin:6px 0 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:11.5px;overflow:auto;white-space:pre-wrap;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+  .empty{color:var(--muted);font-size:12px;font-style:italic}
+  footer{color:var(--muted);font-size:11px;border-top:1px solid var(--border);padding-top:10px;margin-top:6px;display:flex;gap:16px;flex-wrap:wrap}
+  .spark{width:100%;height:56px;display:block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>SOC KOFFI</h1>
+    <span class="badge" id="socBadge">chargement…</span>
+    <span class="spacer"></span>
+    <span class="badge" id="genAt">—</span>
+    <button id="refreshBtn">Recollecter</button>
+  </header>
+
+  <section class="kpis" id="kpis"></section>
+
+  <div class="cols">
+    <div>
+      <div class="card">
+        <h2>Postes surveilles <span class="badge" id="agentCount"></span></h2>
+        <table>
+          <thead><tr><th>ID</th><th>Nom</th><th>Etat</th><th>Keepalive</th><th>OS</th><th>Inventaire</th></tr></thead>
+          <tbody id="agentRows"><tr><td colspan="6" class="empty">—</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Alertes 24 h <span class="badge" id="alertTotal"></span></h2>
+        <svg class="spark" id="spark" viewBox="0 0 600 56" preserveAspectRatio="none"></svg>
+        <div id="levels"></div>
+        <div id="critList"></div>
+      </div>
+
+      <div class="card">
+        <h2>Regles les plus frequentes</h2>
+        <ul class="clean" id="topRules"></ul>
+      </div>
+    </div>
+
+    <div>
+      <div class="card summary">
+        <h2>Bilan <span class="badge" id="summarySource"></span></h2>
+        <p class="mark" id="summaryHeadline">—</p>
+        <ul id="summaryBullets"></ul>
+      </div>
+
+      <div class="card">
+        <h2>Pistes de reponse <span class="badge" id="findingCount"></span></h2>
+        <div id="findings"></div>
+      </div>
+
+      <div class="card">
+        <h2>Suivi GitHub</h2>
+        <ul class="clean" id="issues"></ul>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span id="source">source : —</span>
+    <span>Mode pull : le tableau de bord lit un snapshot produit par l'agent. Aucun acces direct a Wazuh.</span>
+  </footer>
+</div>
+
+<script>window.__SNAPSHOT__ = {"generated_at": "2026-11-02T19:14:32Z", "soc": {"version": "Wazuh 4.14.9", "mode": "single-node", "indexer": "green", "containers": [{"name": "single-node-wazuh.dashboard-1", "status": "Up About an hour", "image": "wazuh/wazuh-dashboard:4.14.9"}, {"name": "single-node-wazuh.manager-1", "status": "Up About a minute", "image": "wazuh/wazuh-manager:4.14.9"}, {"name": "single-node-wazuh.indexer-1", "status": "Up About an hour", "image": "wazuh/wazuh-indexer:4.14.9"}]}, "score": 90, "agents": [{"id": "000", "name": "wazuh.manager", "status": "active", "ip": "127.0.0.1", "version": "v4.14.9", "last_keepalive": "9999-12-31T23:59:59", "os": "Amazon Linux", "inventory": true}, {"id": "002", "name": "zbook-hp", "status": "active", "ip": "127.0.0.1", "version": "v4.14.9", "last_keepalive": "2026-11-02T19:13:04", "os": "Microsoft Windows 11 Pro", "inventory": false}], "alerts": {"total_24h": 194, "by_level": {"10": 2, "9": 2, "7": 1, "5": 23, "4": 27, "3": 139}, "top_rules": [{"rule": "Software protection service scheduled successfully.", "count": 68}, {"rule": "Windows Logon Success", "count": 46}, {"rule": "Summary event of the report's signatures.", "count": 24}, {"rule": "Windows System error event", "count": 15}, {"rule": "Service startup type was changed", "count": 11}, {"rule": "The VSS service is shutting down due to idle timeout.", "count": 5}, {"rule": "Skipped creation of restore point for C:\\\\WINDOWS\\\\system32\\\\svchost.exe -k netsvcs -p -s wuauserv, Windows Update as there is a previous restore point available.", "count": 3}, {"rule": "Multiple System error events", "count": 2}, {"rule": "Non service account logged off.", "count": 2}, {"rule": "Special privileges assigned to new logon.", "count": 2}], "by_agent": [{"name": "zbook-hp", "count": 193}, {"name": "wazuh.manager", "count": 1}], "hourly": [{"t": "19:00", "count": 0}, {"t": "20:00", "count": 0}, {"t": "21:00", "count": 0}, {"t": "22:00", "count": 0}, {"t": "23:00", "count": 0}, {"t": "00:00", "count": 0}, {"t": "01:00", "count": 0}, {"t": "02:00", "count": 0}, {"t": "03:00", "count": 0}, {"t": "04:00", "count": 0}, {"t": "05:00", "count": 0}, {"t": "06:00", "count": 0}, {"t": "07:00", "count": 0}, {"t": "08:00", "count": 0}, {"t": "09:00", "count": 0}, {"t": "10:00", "count": 0}, {"t": "11:00", "count": 0}, {"t": "12:00", "count": 0}, {"t": "13:00", "count": 0}, {"t": "14:00", "count": 0}, {"t": "15:00", "count": 0}, {"t": "16:00", "count": 0}, {"t": "17:00", "count": 0}, {"t": "18:00", "count": 0}, {"t": "19:00", "count": 194}], "critical_7d": 2, "critical_samples": [{"time": "2026-11-02T19:13:49", "agent": "zbook-hp", "level": 10, "rule": "Multiple System error events"}, {"time": "2026-11-02T19:13:37", "agent": "zbook-hp", "level": 10, "rule": "Multiple System error events"}]}, "findings": [{"id": "no-inventory-002", "severity": "majeur", "title": "Inventaire absent pour zbook-hp", "detail": "Aucun index wazuh-states-inventory-*-<agent> : ni paquets, ni ports, ni vulnerabilites.", "evidence": "_cat/indices/wazuh-states-inventory-system* (1 index, manager seulement)", "playbook": ["Verifier <wodle name=\"syscollector\"> dans %PROGRAMFILES(X86)%\\ossec-agent\\ossec.conf", "Activer : <disabled>no</disabled>, intervals 3600", "Restart-Service WazuhSvc, puis attendre un cycle (1 h)"]}], "ai_summary": {"headline": "SOC partiellement rétabli : poste en ligne, angle mort d'inventaire", "bullets": ["2 agents enregistrés, tous deux actifs : le manager (000) et le poste Windows zbook-hp (002). Le poste émet à nouveau après la panne de l'API wazuh-apid.", "81 alertes sur 24 h, dont 2 de niveau >= 10 sur 7 jours : la capacité de détection commence à produire du signal, mais l'activité est récente (SOC redémarré aujourd'hui).", "Angle mort principal : aucun index wazuh-states-inventory-*-zbook-hp. Pas d'inventaire paquets, ports ni OS, donc le module de vulnérabilités reste vide pour le poste.", "Règle de lecture : les agents apparaissent en 127.0.0.1 parce que le relais WSL est devant, pas parce qu'ils tournent dans WSL. Filtrer sur agent.name, l'ID change au réenrôlement.", "À traiter en premier : activer syscollector côté poste (ossec.conf + Restart-Service WazuhSvc), puis vérifier au bout d'un cycle d'une heure l'apparition de l'index d'inventaire."], "source": "agent"}, "github": {"repo": "Richard808339/cyber-soc-agent", "open_issues": [{"number": 1, "title": "syscollector absent pour l'agent zbook-hp", "url": "https://github.com/Richard808339/cyber-soc-agent/issues/1"}]}, "source": "wazuh-api + indexer (lecture seule)"};</script>
+<script>const EMBEDDED = window.__SNAPSHOT__ || null;
+const LEVEL_COLOR = (n) => n >= 12 ? 'var(--bad)' : n >= 8 ? 'var(--warn)' : n >= 5 ? 'var(--accent)' : 'var(--info)';
+
+function el(tag, cls, txt){ const e=document.createElement(tag); if(cls) e.className=cls; if(txt!==undefined) e.textContent=txt; return e; }
+function pct(a,b){ return b ? Math.round(100*a/b) : 0; }
+
+function render(s){
+  document.getElementById('socBadge').textContent = `${s.soc.version} · ${s.soc.mode} · indexer ${s.soc.indexer}`;
+  document.getElementById('genAt').textContent = 'releve ' + s.generated_at;
+  document.getElementById('source').textContent = 'source : ' + s.source;
+
+  const assets = s.agents.filter(a => a.id !== '000');
+  const actifs = assets.filter(a => a.status === 'active').length;
+  const bruit = pct((s.alerts.by_level['3']||0)+(s.alerts.by_level['7']||0), s.alerts.total_24h);
+
+  const kpis = [
+    ['Score de posture', s.score + '/100', s.soc.containers?.length ? s.soc.containers.length + ' conteneurs' : ''],
+    ['Agents actifs', actifs + '/' + assets.length, assets.filter(a=>a.status!=='active').map(a=>a.name).join(', ') || 'tous en ligne'],
+    ['Alertes 24 h', s.alerts.total_24h, 'toutes severites'],
+    ['Critiques 7 j', s.alerts.critical_7d, s.alerts.critical_7d ? 'a traiter' : 'aucune'],
+    ['Bruit (niv. 3+7)', bruit + ' %', bruit > 75 ? 'signal noye' : 'acceptable'],
+    ['Pistes ouvertes', s.findings.length, s.findings.filter(f=>f.severity==='critique').length + ' critique(s)'],
+  ];
+  const kbox = document.getElementById('kpis'); kbox.innerHTML='';
+  kpis.forEach(([k,v,sub])=>{
+    const c=el('div','kpi'); c.appendChild(el('div','k',k));
+    const vv=el('div','v',String(v)); c.appendChild(vv); c.appendChild(el('div','s',sub||'')); kbox.appendChild(c);
+  });
+
+  document.getElementById('agentCount').textContent = s.agents.length + ' enregistre(s)';
+  const tb=document.getElementById('agentRows'); tb.innerHTML='';
+  s.agents.forEach(a=>{
+    const tr=el('tr');
+    tr.appendChild(el('td',null,a.id));
+    tr.appendChild(el('td','mark',a.name));
+    const st=el('td'); const p=el('span','pill '+(a.status==='active'?'ok':'bad'),a.status); st.appendChild(p); tr.appendChild(st);
+    tr.appendChild(el('td',null,a.last_keepalive.slice(11) || '—'));
+    tr.appendChild(el('td',null,(a.os||'').slice(0,26)||'—'));
+    const inv=el('td'); inv.appendChild(el('span','mark '+(a.inventory?'ok':'bad'), a.inventory?'oui':'non')); tr.appendChild(inv);
+    tb.appendChild(tr);
+  });
+
+  document.getElementById('alertTotal').textContent = s.alerts.total_24h + ' alertes';
+  const max = Math.max(1, ...Object.values(s.alerts.by_level||{}).map(Number));
+  const lv=document.getElementById('levels'); lv.innerHTML='';
+  Object.keys(s.alerts.by_level||{}).sort((a,b)=>b-a).forEach(k=>{
+    const n=Number(k), c=s.alerts.by_level[k];
+    const row=el('div','lvl');
+    row.appendChild(el('div','n','n'+n));
+    const bw=el('div','bar'); const fill=el('i'); fill.style.width=Math.max(2,100*c/max)+'%'; fill.style.background=LEVEL_COLOR(n);
+    bw.appendChild(fill); row.appendChild(bw);
+    row.appendChild(el('div','c',String(c)));
+    lv.appendChild(row);
+  });
+
+  const sp=document.getElementById('spark'); sp.innerHTML='';
+  const pts=s.alerts.hourly||[];
+  if(pts.length){
+    const m=Math.max(1,...pts.map(p=>p.count));
+    const step=600/Math.max(1,pts.length-1);
+    const path=pts.map((p,i)=>`${i*step},${56-(p.count/m)*50}`).join(' ');
+    sp.innerHTML=`<polyline points="${path}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round"/>`;
+  }
+
+  const cr=document.getElementById('critList'); cr.innerHTML='';
+  const samples=(s.alerts.critical_samples||[]);
+  if(samples.length){
+    cr.appendChild(el('div','k','Dernieres alertes critiques (>= 10)'));
+    samples.slice(0,4).forEach(a=>{
+      const row=el('div','lvl');
+      row.appendChild(el('div','n','n'+a.level));
+      row.appendChild(el('div',null,(a.agent||'?')+' · '+a.time.slice(11)));
+      row.appendChild(el('div','c',''));
+      cr.appendChild(row);
+      cr.appendChild(el('div','e',a.rule||''));
+    });
+  }
+
+  const tr2=document.getElementById('topRules'); tr2.innerHTML='';
+  (s.alerts.top_rules||[]).slice(0,8).forEach(r=>{
+    const li=el('li'); li.appendChild(el('span',null,r.rule)); li.appendChild(el('span',null,r.count)); tr2.appendChild(li);
+  });
+  if(!(s.alerts.top_rules||[]).length) tr2.appendChild(el('li','empty','aucune alerte sur la periode'));
+
+  const sum=s.ai_summary||{};
+  document.getElementById('summarySource').textContent = sum.source==='agent' ? 'agent' : 'regles';
+  document.getElementById('summaryHeadline').textContent = sum.headline||'—';
+  const bl=document.getElementById('summaryBullets'); bl.innerHTML='';
+  (sum.bullets||[]).forEach(b=>{ const li=el('li',null,b); bl.appendChild(li); });
+
+  document.getElementById('findingCount').textContent = s.findings.length + ' piste(s)';
+  const fd=document.getElementById('findings'); fd.innerHTML='';
+  if(!s.findings.length) fd.appendChild(el('div','empty','aucune piste ouverte'));
+  s.findings.forEach(f=>{
+    const d=el('div','finding '+f.severity);
+    d.appendChild(el('div','t','['+f.severity+'] '+f.title));
+    d.appendChild(el('div','d',f.detail));
+    d.appendChild(el('div','e','preuve : '+(f.evidence||'—')));
+    const det=el('details'); det.appendChild(el('summary',null,'procedure'));
+    const pre=el('pre',null,(f.playbook||[]).map((c,i)=>`${i+1}. ${c}`).join('\n'));
+    det.appendChild(pre); d.appendChild(det); fd.appendChild(d);
+  });
+
+  const iss=document.getElementById('issues'); iss.innerHTML='';
+  const gi=(s.github&&s.github.open_issues)||[];
+  if(!gi.length) iss.appendChild(el('li','empty','aucune issue ouverte'));
+  gi.forEach(i=>{
+    const li=el('li'); const a=document.createElement('a');
+    a.href=i.url; a.target='_blank'; a.rel='noreferrer'; a.textContent='#'+i.number+' '+i.title;
+    a.style.color='var(--fg)'; a.style.textDecoration='none';
+    li.appendChild(a); iss.appendChild(li);
+  });
+}
+
+async function load(refresh){
+  try{
+    const r = await fetch(refresh?'/api/refresh':'/api/snapshot', {method: refresh?'POST':'GET'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    render(await r.json());
+  }catch(e){
+    if(EMBEDDED){ render(EMBEDDED); return; }
+    document.getElementById('socBadge').textContent = 'snapshot indisponible : ' + e.message;
+  }
+}
+
+document.getElementById('refreshBtn').addEventListener('click', ()=>load(true));
+load(false);
+setInterval(()=>load(false), 60000);
+</script>
+</body>
+</html>
