@@ -11,6 +11,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -406,6 +407,172 @@ class TestNotifier(unittest.TestCase):
             hors_ascii = {c for c in msg if ord(c) > 0x2200}
             self.assertFalse(hors_ascii, "caractères à risque : %r" % hors_ascii)
         self.assertIn("[CRITIQUE]", alertes)
+
+
+class TestBroker(unittest.TestCase):
+    """Broker d'autorisation : politique, blocage par defaut, decision, expiration."""
+
+    def setUp(self):
+        import broker
+        self.broker = broker
+        self.tmp = tempfile.mkdtemp(prefix="socbroker-")
+        broker.DB_PATH = os.path.join(self.tmp, "b.db")
+        broker.init()
+        # Pas d'envoi reel : notify_request devient un no-op qui simule Telegram.
+        self._vrai_notify = broker.notify_request
+        broker.notify_request = lambda *a, **k: 999
+        self._vrai_notify_decision = broker.notify_decision
+        broker.notify_decision = lambda *a, **k: None
+
+    def tearDown(self):
+        self.broker.notify_request = self._vrai_notify
+        self.broker.notify_decision = self._vrai_notify_decision
+
+    def test_politique_actions_sensibles(self):
+        for action in ("docker restart single-node-wazuh.indexer-1",
+                       "docker rm -f single-node-wazuh.manager-1",
+                       "netsh advfirewall set allprofiles state off",
+                       "iptables -A INPUT -j DROP",
+                       "git push origin main",
+                       "rm -rf /var/ossec"):
+            risque, _ = self.broker.classify(action)
+            self.assertIn(risque, ("critique", "eleve", "moyen"), action)
+
+    def test_politique_lecture_seule_sans_demande(self):
+        for action in ("docker ps", "docker logs --tail 20 x", "git status",
+                       "curl -sk https://localhost:9200/_cluster/health", "ls -la"):
+            risque, _ = self.broker.classify(action)
+            self.assertIsNone(risque, action)
+
+    def test_demande_bloquee_par_defaut(self):
+        code, risque, libelle = self.broker.new_request("docker stop single-node-wazuh.manager-1")
+        row = self.broker.get(code)
+        self.assertEqual(row["status"], "pending")
+        self.assertEqual(row["risk"], "critique")
+        self.assertTrue(libelle)
+        self.assertIn(code, [r["id"] for r in self.broker.list_requests()])
+
+    def test_execution_refusee_tant_que_non_approuvee(self):
+        code, _, _ = self.broker.new_request("docker rm -f single-node-wazuh.indexer-1")
+        ok, msg = self.broker.execute(code)
+        self.assertFalse(ok)
+        self.assertIn("refusee", msg)
+
+    def test_approbation_puis_execution(self):
+        code, _, _ = self.broker.new_request('echo "action approuvee"')
+        ok, _ = self.broker.approve(code, "test")
+        self.assertTrue(ok)
+        ok, sortie = self.broker.execute(code)
+        self.assertTrue(ok)
+        self.assertIn("action approuvee", sortie)
+        self.assertEqual(self.broker.get(code)["status"], "executed")
+        # une action ne s'execute pas deux fois
+        ok2, msg2 = self.broker.execute(code)
+        self.assertFalse(ok2)
+
+    def test_refus(self):
+        code, _, _ = self.broker.new_request("git push origin main")
+        self.assertTrue(self.broker.deny(code, "test", "pas maintenant")[0])
+        self.assertEqual(self.broker.get(code)["status"], "denied")
+        self.assertFalse(self.broker.execute(code)[0])
+
+    def test_expiration_refus_par_defaut(self):
+        code, _, _ = self.broker.new_request("docker restart x", ttl=1)
+        time.sleep(2.2)
+        ok, msg = self.broker.approve(code)
+        self.assertFalse(ok)
+        self.assertIn("expire", msg)
+        self.assertEqual(self.broker.get(code)["status"], "expired")
+
+    def test_journal_audit(self):
+        code, _, _ = self.broker.new_request("docker stop x")
+        self.broker.approve(code, "cli")
+        with self.broker.connect() as conn:
+            events = [r["event"] for r in conn.execute(
+                "SELECT event FROM approval_audit WHERE approval_id = ? ORDER BY id", (code,))]
+        self.assertEqual(events[:2], ["demande", "approbation"])
+
+    def test_parse_update_bouton(self):
+        maj = {"callback_query": {"id": "1", "data": "approve:ab12cd34",
+                                  "from": {"id": 42}, "message": {"chat": {"id": 42}}}}
+        code, decision, acteur = self.broker.parse_update(maj)
+        self.assertEqual((code, decision), ("ab12cd34", "approved"))
+        self.assertIn("42", acteur)
+
+    def test_parse_update_bouton_refus(self):
+        maj = {"callback_query": {"id": "1", "data": "deny:ab12cd34", "from": {"id": 42},
+                                  "message": {"chat": {"id": 42}}}}
+        self.assertEqual(self.broker.parse_update(maj)[:2], ("ab12cd34", "denied"))
+
+    def test_parse_update_texte(self):
+        maj = {"message": {"text": "approuver ab12cd34", "from": {"id": 42}, "chat": {"id": 42}}}
+        self.assertEqual(self.broker.parse_update(maj)[:2], ("ab12cd34", "approved"))
+        maj = {"message": {"text": "refuser ab12cd34", "from": {"id": 42}, "chat": {"id": 42}}}
+        self.assertEqual(self.broker.parse_update(maj)[:2], ("ab12cd34", "denied"))
+
+    def test_parse_update_ignore_le_reste(self):
+        self.assertEqual(self.broker.parse_update({"message": {"text": "bonjour"}})[:2], (None, None))
+        self.assertEqual(self.broker.parse_update({})[:2], (None, None))
+
+    def test_details_html_echappes(self):
+        """Un detail contenant <id> ou & faisait echouer Telegram (400) : doit etre echappe."""
+        self.assertEqual(self.broker._e("lancer wait <id> --exec"),
+                         "lancer wait &lt;id&gt; --exec")
+        self.assertEqual(self.broker._e("a & b"), "a &amp; b")
+
+    def test_watch_applique_un_bouton_telegram(self):
+        """Le veilleur Telegram doit transformer un appui bouton en decision."""
+        code, _, _ = self.broker.new_request("docker stop x")
+        os.environ["SOC_TELEGRAM_TOKEN"] = "jeton-test"
+        os.environ["SOC_TELEGRAM_CHAT_ID"] = "42"
+        appels = []
+        file_updates = [{"update_id": 7, "callback_query": {
+            "id": "cb1", "data": "approve:%s" % code, "from": {"id": 42},
+            "message": {"chat": {"id": 42}}}}]
+
+        def faux_tg(method, **params):
+            appels.append(method)
+            if method == "getUpdates":
+                if file_updates:
+                    return {"ok": True, "result": [file_updates.pop(0)]}
+                raise KeyboardInterrupt
+            return {"ok": True, "result": True}
+
+        vrai_tg = self.broker.tg
+        self.broker.tg = faux_tg
+        try:
+            self.broker.watch(poll_seconds=0.01)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.broker.tg = vrai_tg
+        self.assertEqual(self.broker.get(code)["status"], "approved")
+        self.assertIn("answerCallbackQuery", appels)
+
+    def test_watch_ignore_un_chat_non_autorise(self):
+        code, _, _ = self.broker.new_request("docker stop x")
+        os.environ["SOC_TELEGRAM_TOKEN"] = "jeton-test"
+        os.environ["SOC_TELEGRAM_CHAT_ID"] = "42"
+        file_updates = [{"update_id": 8, "callback_query": {
+            "id": "cb2", "data": "approve:%s" % code, "from": {"id": 999},
+            "message": {"chat": {"id": 999}}}}]
+
+        def faux_tg(method, **params):
+            if method == "getUpdates":
+                if file_updates:
+                    return {"ok": True, "result": [file_updates.pop(0)]}
+                raise KeyboardInterrupt
+            return {"ok": True, "result": True}
+
+        vrai_tg = self.broker.tg
+        self.broker.tg = faux_tg
+        try:
+            self.broker.watch(poll_seconds=0.01)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.broker.tg = vrai_tg
+        self.assertEqual(self.broker.get(code)["status"], "pending")
 
 
 class TestSummaryFreshness(unittest.TestCase):

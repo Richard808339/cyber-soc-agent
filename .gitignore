@@ -26,3 +26,4 @@ soc-dashboard/.env
 soc-dashboard/soc.db
 soc-dashboard/*.log
 soc-dashboard/static/*.png
+soc-dashboard/logs/

@@ -171,6 +171,44 @@ L'anti-doublon est stocké en base (`notifications`) : deux collectes successive
 le même constat ne produisent qu'un seul message. Vérifié sur une instance isolée :
 2 ingestions dégradées → 1 seul message (message_id 39).
 
+## Broker d'autorisation (HITL)
+
+Aucune action sensible n'est executee sans un accord humain explicite. Le broker
+classe l'action, la bloque, t'envoie une demande sur Telegram avec deux boutons,
+et n'execute que si tu approuves. Sans reponse dans le delai (300 s par defaut),
+c'est un refus.
+
+```bash
+python broker.py request --action "docker restart single-node-wazuh.indexer-1" \
+    --details "Relance de l'indexeur apres passage en yellow"
+python broker.py list
+python broker.py approve <id>          # ou le bouton Approuver dans Telegram
+python broker.py deny <id> --reason "pas maintenant"
+python broker.py guard "docker restart single-node-wazuh.indexer-1" --execute
+python broker.py watch                 # ecoute Telegram en continu
+python broker.py audit --limit 20      # journal des decisions
+```
+
+Fonctionnement interne
+  - Etat dans SQLite (`approvals`, `approval_audit`) : n'importe quel processus
+    peut approuver, un redemarrage ne perd rien, tout est horodate.
+  - Deux canaux : boutons inline Telegram, ou commandes texte `approuver <id>` /
+    `refuser <id>`. Seul le chat configure (`SOC_TELEGRAM_CHAT_ID`) est accepte ;
+    une decision venue d'un autre chat est ignoree et journalisee.
+  - Refus par defaut : demande expiree, pas de reponse, ou decision arrivee
+    apres expiration -> l'action ne part pas. Une action approuvee ne s'execute
+    qu'une fois.
+  - Classification : `docker rm|stop|restart`, pare-feu (`iptables`, `netsh
+    advfirewall`, `ufw`), `git push`, `rm -rf`, `shutdown`, `systemctl stop`,
+    `curl | sh`... Les lectures (`docker ps`, `docker logs`, `git status`,
+    `curl` GET) passent sans demander, sinon le broker devient une machine a
+    cliquer sur « Approuver » sans lire.
+
+Veilleur Telegram : lance au logon par `SOC-Broker-Telegram.vbs` (dossier
+Demarrage de l'utilisateur), journal dans `logs/broker.log`. Sans lui, les
+boutons restent sans effet (Telegram conserve les appuis, il les traitera au
+prochain demarrage).
+
 ## Diagnostic du SOC
 
 Le collecteur lit aussi l'état de la pile (conteneurs Docker de la distro WSL,
