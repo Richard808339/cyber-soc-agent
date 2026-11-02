@@ -20,12 +20,14 @@ except Exception:
 from agents.cyber_agent import run_cyber_task
 from agents.builder_agent import run_builder_task
 from agents.research_agent import run_research_task
+from agents.repo_agent import run_repo_task
 
 
 ROUTES = {
     "cyber": ("Cyber Agent (Wazuh, SOC, agents)", run_cyber_task),
     "builder": ("Builder Agent (scripts, code, automatisation)", run_builder_task),
     "research": ("Research Agent (documents locaux, veille)", run_research_task),
+    "repo": ("Repo Agent (GitHub : etat, issues, workflows)", run_repo_task),
 }
 
 
