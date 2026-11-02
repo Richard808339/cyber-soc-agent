@@ -37,8 +37,8 @@ jobs:
 
     - name: Bandit (analyse statique Python)
       run: |
-        bandit -r . -x ./.git,./.github -ll -f screen || true
-        bandit -r . -x ./.git,./.github -f sarif -o bandit.sarif || true
+        bandit -r . -x ./.git,./.github -ll -f screen --exit-zero
+        bandit -r . -x ./.git,./.github -f json -o bandit.json --exit-zero
 
     - name: Semgrep (regles communaute, sans token)
       run: semgrep scan --config=p/default --config=p/python --sarif --output=semgrep.sarif
@@ -61,6 +61,6 @@ jobs:
       with:
         name: security-reports
         path: |
-          bandit.sarif
+          bandit.json
           semgrep.sarif
         if-no-files-found: warn
