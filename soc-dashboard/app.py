@@ -13,9 +13,7 @@ Lancement : python app.py [--port 8765] [--bind 127.0.0.1]
 import argparse
 import hmac
 import json
-import mimetypes
 import os
-import re
 import sys
 import urllib.parse
 from datetime import datetime, timezone
@@ -36,6 +34,18 @@ except Exception:
 
 STATIC_DIR = os.path.join(HERE, "static")
 MAX_BODY = 8 * 1024 * 1024
+
+# Table figee des types servis : le Content-Type ne depend jamais de la requete.
+CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".txt": "text/plain; charset=utf-8",
+}
 SUMMARY_TTL_SECONDS = int(os.environ.get("SOC_SUMMARY_TTL", "600"))
 # Intervalle minimal entre deux regenerations automatiques (evite d'appeler le LLM a chaque collecte).
 SUMMARY_MIN_INTERVAL = int(os.environ.get("SOC_SUMMARY_MIN_INTERVAL", "120"))
@@ -117,14 +127,9 @@ class Handler(BaseHTTPRequestHandler):
     def _send_file(self, path):
         if not path or not os.path.isfile(path):
             return self._send_json({"error": "introuvable"}, 404)
-        ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
-        ctype = ctype.split(";")[0].strip()
-        # Liste blanche stricte : aucune valeur derivee de l'URL ne doit atterrir
-        # telle quelle dans un en-tete (injection CRLF / response splitting).
-        if not re.fullmatch(r"[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+", ctype):
-            ctype = "application/octet-stream"
-        if ctype.startswith("text/") or ctype in ("application/javascript", "application/json"):
-            ctype += "; charset=utf-8"
+        # Type MIME issu d'une table figee : aucune valeur derivee de la requete
+        # n'atteint l'en-tete (pas d'injection CRLF, pas de backtracking regex).
+        ctype = CONTENT_TYPES.get(os.path.splitext(path)[1].lower(), "application/octet-stream")
         with open(path, "rb") as fh:
             data = fh.read()
         self.send_response(200)
