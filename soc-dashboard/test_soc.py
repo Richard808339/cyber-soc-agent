@@ -742,6 +742,73 @@ class TestNetworkWatch(unittest.TestCase):
         titres = [f["title"] for f in summarizer.findings(snap)]
         self.assertFalse(any("Nouvel appareil" in t for t in titres))
 
+    # --- inventaire declare (allowlist) ---
+
+    def test_actif_declare_puis_retire(self):
+        import assets
+        mac = assets.ajouter("D4:01:C3:C3:BC:C6", ip="10.10.10.1",
+                             hostname="mikrotik-gw", device_type="mikrotik_router")
+        self.assertEqual(mac, "d4-01-c3-c3-bc-c6")
+        self.assertEqual([a["hostname"] for a in assets.lister()], ["mikrotik-gw"])
+        self.assertTrue(assets.retirer("d4-01-c3-c3-bc-c6"))
+        self.assertEqual(assets.lister(), [])
+
+    def test_mac_invalide_refusee(self):
+        import assets
+        with self.assertRaises(ValueError):
+            assets.ajouter("zz-zz")
+
+    def test_cartes_virtuelles_ignorees(self):
+        """Hyper-V/VMware sont dans l'ARP en permanence : ne pas les signaler."""
+        import assets
+        assets.ajouter("d4-01-c3-c3-bc-c6", ip="10.10.10.1", device_type="mikrotik_router")
+        res = self.net.inventorier(arp={"d4-01-c3-c3-bc-c6": "10.10.10.1",
+                                        "00-50-56-ec-8e-7c": "192.168.174.254",
+                                        "74-24-9f-cc-af-e1": "192.168.1.1"},
+                                   resoudre_constructeur=False)
+        self.assertEqual([h["mac"] for h in res["hors_inventaire"]], ["74-24-9f-cc-af-e1"])
+        self.assertEqual(res["virtuels_ignores"], 1)
+
+    def test_allowlist_flag_les_non_declares(self):
+        import assets
+        assets.ajouter("d4-01-c3-c3-bc-c6", ip="10.10.10.1", device_type="mikrotik_router")
+        res = self.net.inventorier(arp={"d4-01-c3-c3-bc-c6": "10.10.10.1",
+                                        "11-22-33-44-55-66": "10.10.5.99"},
+                                   resoudre_constructeur=False)
+        self.assertEqual([h["mac"] for h in res["hors_inventaire"]], ["11-22-33-44-55-66"])
+        self.assertEqual(res["declares"], 1)
+
+    def test_sans_base_declaree_pas_de_hors_inventaire(self):
+        res = self.net.inventorier(arp={"11-22-33-44-55-66": "10.10.5.99"},
+                                   resoudre_constructeur=False)
+        self.assertEqual(res["hors_inventaire"], [])
+        self.assertEqual(len(res["nouveaux"]), 1)
+
+    def test_constat_hors_inventaire(self):
+        snap = {"agents": [], "alerts": {"total_24h": 5},
+                "stack": {"available": True, "indexer_health": "green"}, "errors": [],
+                "network": {"hors_inventaire": [{"mac": "11-22-33-44-55-66",
+                                                 "ip": "10.10.5.99",
+                                                 "constructeur": "Intel Corporate"}]}}
+        constats = [f for f in summarizer.findings(snap) if "hors inventaire" in f["title"]]
+        self.assertEqual(len(constats), 1)
+        self.assertIn("Intel Corporate", constats[0]["evidence"])
+
+    def test_absence_signalee_seulement_si_activee(self):
+        snap = {"agents": [], "alerts": {"total_24h": 5},
+                "stack": {"available": True, "indexer_health": "green"}, "errors": [],
+                "network": {"absents": [{"mac": "aa-bb-cc-dd-ee-01", "hostname": "poste",
+                                         "ip": "10.0.0.2", "device_type": "poste"}]}}
+        os.environ.pop("SOC_ASSET_ABSENT_ALERT", None)
+        titres = [f["title"] for f in summarizer.findings(snap)]
+        self.assertFalse(any("absent" in t for t in titres))
+        os.environ["SOC_ASSET_ABSENT_ALERT"] = "1"
+        try:
+            titres = [f["title"] for f in summarizer.findings(snap)]
+            self.assertTrue(any("absent" in t for t in titres), titres)
+        finally:
+            os.environ.pop("SOC_ASSET_ABSENT_ALERT", None)
+
 
 class TestSummaryFreshness(unittest.TestCase):
     """Un bilan ne doit jamais decrire des donnees plus anciennes que le dernier snapshot."""

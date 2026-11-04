@@ -317,10 +317,28 @@ Le constructeur est resolu par prefixe OUI (API macvendors, cache local dans
 
 Le collecteur l'appelle a chaque cycle : la surveillance est donc continue.
 
-Limite : l'ARP ne voit que ce que l'hote a contacte recemment. Pour le LAN
-complet (equipements qui ne parlent pas a ce poste), interroger le routeur
-MikroTik : `/ip/arp` et `/ip/dhcp-server/lease`. Non implemente — il faut un
-compte API en lecture seule sur le routeur.
+### Inventaire des actifs (allowlist)
+
+Sans liste de reference, « nouvel appareil » ne veut rien dire : tout appareil
+deja vu une fois devenait « connu », intrus compris. L'inventaire declare ce qui
+est legitime ; le reste est signale comme hors inventaire.
+
+```bash
+python assets.py list
+python assets.py add --mac d4-01-c3-c3-bc-c6 --ip 10.10.10.1 \
+    --hostname mikrotik-gw --type mikrotik_router --note "passerelle"
+python assets.py import-arp      # base de depart : declare tout ce qui est vu
+python assets.py remove --mac <mac>
+```
+
+Le constat produit est `Appareil(s) hors inventaire : N` (severite
+`SOC_NEW_DEVICE_LEVEL`, defaut `eleve`), avec IP, MAC et constructeur.
+Les cartes virtuelles (Hyper-V `00-15-5d`, VMware `00-50-56`/`00-0c-29`,
+VirtualBox `08-00-27`, KVM `52-54-00`, Docker `02-42-`) sont comptees a part
+(`virtuels_ignores`) et n'alertent pas : elles sont dans l'ARP en permanence et
+noyeraient le signal. `SOC_INCLUDE_VIRTUAL=1` pour les inclure.
+`SOC_ASSET_ABSENT_ALERT=1` ajoute le constat inverse (actif declare mais absent,
+desactive par defaut : un portable eteint n'est pas un incident).
 
 ## Diagnostic du SOC
 

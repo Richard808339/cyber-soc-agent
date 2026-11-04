@@ -215,24 +215,54 @@ def findings(snapshot):
 
     reseau = snapshot.get("network") or {}
     nouveaux = reseau.get("nouveaux") or []
-    if nouveaux:
-        niveau = (os.environ.get("SOC_NEW_DEVICE_LEVEL") or "eleve").strip().lower()
-        if niveau not in ("critique", "eleve", "moyen", "faible"):
-            niveau = "eleve"
+    hors = reseau.get("hors_inventaire") or []
+    niveau = (os.environ.get("SOC_NEW_DEVICE_LEVEL") or "eleve").strip().lower()
+    if niveau not in ("critique", "eleve", "moyen", "faible"):
+        niveau = "eleve"
+
+    def _appareils(bloc, limite=5):
+        return ", ".join(
+            "%s (%s%s)" % (n.get("ip") or "-", n.get("mac"),
+                           (" — " + n["constructeur"]) if n.get("constructeur") else "")
+            for n in bloc[:limite])
+
+    if hors:
+        out.append({
+            "level": niveau,
+            "title": "Appareil(s) hors inventaire : %d" % len(hors),
+            "detail": "Ces adresses MAC ne figurent pas dans l'inventaire declare : "
+                      "materiel non recense, ou intrusion. Un actif legitime se declare "
+                      "avec python assets.py add.",
+            "evidence": _appareils(hors),
+            "actions": ["python assets.py list  (verifier ce qui est declare)",
+                        "python assets.py add --mac <mac> --ip <ip> --type <type> si legitime",
+                        "Verifier /ip/dhcp-server/lease sur le routeur MikroTik"],
+        })
+    elif nouveaux:
         out.append({
             "level": niveau,
             "title": "Nouvel appareil sur le reseau local : %d" % len(nouveaux),
-            "detail": "Appareil(s) jamais vu(s) dans l'inventaire ARP. Un equipement "
-                      "inconnu sur le LAN merite d'etre identifie : materiel legitime "
-                      "ou intrusion.",
-            "evidence": ", ".join(
-                "%s (%s%s)" % (n.get("ip"), n.get("mac"),
-                               (" — " + n["constructeur"]) if n.get("constructeur") else "")
-                for n in nouveaux[:5]),
-            "actions": ["Identifier les adresses MAC : constructeur via le prefixe OUI",
-                        "Verifier /ip/dhcp-server/lease sur le routeur MikroTik",
-                        "Si inconnu : l'isoler du LAN puis enqueter"],
+            "detail": "Appareil(s) jamais vu(s) dans l'inventaire ARP. Aucun actif n'est "
+                      "encore declare : utiliser python assets.py import-arp pour poser "
+                      "une base, puis relire.",
+            "evidence": _appareils(nouveaux),
+            "actions": ["python assets.py import-arp  (base de depart, a relire)",
+                        "Verifier /ip/dhcp-server/lease sur le routeur MikroTik"],
         })
+
+    if os.environ.get("SOC_ASSET_ABSENT_ALERT", "0") == "1":
+        absents = reseau.get("absents") or []
+        if absents:
+            out.append({
+                "level": "moyen",
+                "title": "Actif(s) declare(s) absent(s) du reseau : %d" % len(absents),
+                "detail": "Declares dans l'inventaire mais absents de la table ARP : "
+                          "machine eteinte, hors ligne, ou retirer l'actif de l'inventaire.",
+                "evidence": ", ".join("%s (%s)" % (a.get("hostname") or a.get("mac"),
+                                                   a.get("ip") or "-") for a in absents[:5]),
+                "actions": ["Verifier que l'equipement est alimente et connecte",
+                            "python assets.py remove --mac <mac> s'il est retire"],
+            })
 
     return out
 

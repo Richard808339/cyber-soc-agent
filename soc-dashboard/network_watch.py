@@ -36,6 +36,12 @@ except Exception:
 
 MULTICAST = ("ff-ff-ff-ff-ff-ff", "01-00-5e", "33-33-", "01-80-c2")
 
+# Cartes virtuelles (Hyper-V, VMware, VirtualBox, KVM, Docker) : presentes dans
+# l'ARP mais ce ne sont pas des intrus. Les compter comme "hors inventaire"
+# noierait le signal sous des faux positifs permanents.
+VIRTUELS = ("00-15-5d", "00-50-56", "00-0c-29", "00-05-69", "00-1c-14",
+            "08-00-27", "52-54-00", "02-42-")
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS net_devices (
     mac        TEXT PRIMARY KEY,
@@ -149,7 +155,28 @@ def inventorier(arp=None, maintenant=None, resoudre_constructeur=True):
                 conn.execute("UPDATE net_devices SET ip = ?, last_seen = ?, vu = vu + 1 "
                              "WHERE mac = ?", (ip, maintenant, mac))
         tota = conn.execute("SELECT COUNT(*) AS n FROM net_devices").fetchone()["n"]
-    return {"total_connus": tota, "vus_maintenant": len(arp), "nouveaux": nouveaux}
+
+    # Allowlist : ce qui n'est pas declare dans l'inventaire est hors inventaire.
+    try:
+        import assets
+        declarees = assets.macs_declarees()
+        actifs = {a["mac"]: a for a in assets.lister()}
+    except Exception:
+        declarees, actifs = set(), {}
+    hors = [{"mac": m, "ip": ip, "constructeur": constructeurs.get(m)}
+            for m, ip in sorted(arp.items()) if declarees and m not in declarees]
+    # Cartes virtuelles : comptees a part, sauf demande explicite.
+    inclure_virtuels = os.environ.get("SOC_INCLUDE_VIRTUAL", "0") == "1"
+    virtuels = [h for h in hors if any(h["mac"].startswith(p) for p in VIRTUELS)]
+    if not inclure_virtuels:
+        hors = [h for h in hors if not any(h["mac"].startswith(p) for p in VIRTUELS)]
+    absents = [{"mac": m, "hostname": a.get("hostname"), "ip": a.get("ip"),
+                "device_type": a.get("device_type")}
+               for m, a in actifs.items() if m not in arp]
+
+    return {"total_connus": tota, "vus_maintenant": len(arp), "nouveaux": nouveaux,
+            "declares": len(declarees), "hors_inventaire": hors,
+            "virtuels_ignores": len(virtuels), "absents": absents}
 
 
 def oublier():
