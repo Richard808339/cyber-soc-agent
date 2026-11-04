@@ -300,6 +300,28 @@ lui-meme : le tableau de bord peut etre arrete, le bilan part quand meme.
 Automatise par la tache planifiee `SOC Bilan Quotidien` (08:00, chaque jour),
 lancee en silence par `run-digest.vbs`, journal dans `logs/digest.log`.
 
+### Surveillance du reseau local
+
+```bash
+python network_watch.py            # inventaire + nouveaux appareils
+python network_watch.py --json     # inventaire complet
+python network_watch.py --forget   # repart d'un inventaire vide
+```
+
+Source : la table ARP de l'hote (aucun identifiant, aucun scan actif). Chaque
+releve est compare a l'inventaire ; un appareil jamais vu devient un constat
+`Nouvel appareil sur le reseau local`, remonte au tableau de bord et notifie sur
+Telegram (niveau reglable par `SOC_NEW_DEVICE_LEVEL`, defaut `eleve`).
+Le constructeur est resolu par prefixe OUI (API macvendors, cache local dans
+`net_oui`), ce qui distingue un routeur d'un poste inconnu.
+
+Le collecteur l'appelle a chaque cycle : la surveillance est donc continue.
+
+Limite : l'ARP ne voit que ce que l'hote a contacte recemment. Pour le LAN
+complet (equipements qui ne parlent pas a ce poste), interroger le routeur
+MikroTik : `/ip/arp` et `/ip/dhcp-server/lease`. Non implemente — il faut un
+compte API en lecture seule sur le routeur.
+
 ## Diagnostic du SOC
 
 Le collecteur lit aussi l'état de la pile (conteneurs Docker de la distro WSL,

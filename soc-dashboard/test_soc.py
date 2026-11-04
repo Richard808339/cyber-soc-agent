@@ -685,6 +685,64 @@ class TestBroker(unittest.TestCase):
         self.assertEqual(self.broker.get(code)["status"], "pending")
 
 
+class TestNetworkWatch(unittest.TestCase):
+    """Inventaire reseau : parsing ARP et detection d'un appareil inconnu."""
+
+    def setUp(self):
+        import network_watch
+        self.net = network_watch
+        self.tmp = tempfile.mkdtemp(prefix="socnet-")
+        import broker
+        self.broker = broker
+        broker.DB_PATH = os.path.join(self.tmp, "n.db")
+        broker.init()
+
+    def test_parse_arp_ignore_multicast_et_diffusion(self):
+        table = self.net.parse_arp(
+            "Interface : 10.10.5.45 --- 0xc\n"
+            "  Adresse Internet      Adresse physique      Type\n"
+            "  10.10.4.226           d4-01-c3-c3-bc-c6     dynamique\n"
+            "  10.10.5.88            14-0B-9E-46-FE-69     dynamique\n"
+            "  10.10.255.255         ff-ff-ff-ff-ff-ff     statique\n"
+            "  224.0.0.251           01-00-5e-00-00-fb     statique\n"
+            "  255.255.255.255       ff-ff-ff-ff-ff-ff     statique\n")
+        self.assertEqual(table, {"d4-01-c3-c3-bc-c6": "10.10.4.226",
+                                 "14-0b-9e-46-fe-69": "10.10.5.88"})
+
+    def test_premier_releve_tout_est_nouveau(self):
+        res = self.net.inventorier(arp={"aa-bb-cc-dd-ee-01": "10.0.0.2"}, resoudre_constructeur=False)
+        self.assertEqual(len(res["nouveaux"]), 1)
+        self.assertEqual(res["total_connus"], 1)
+
+    def test_deuxieme_releve_sans_nouveaute(self):
+        self.net.inventorier(arp={"aa-bb-cc-dd-ee-01": "10.0.0.2"}, resoudre_constructeur=False)
+        res = self.net.inventorier(arp={"aa-bb-cc-dd-ee-01": "10.0.0.2"}, resoudre_constructeur=False)
+        self.assertEqual(res["nouveaux"], [])
+
+    def test_appareil_inconnu_detecte(self):
+        self.net.inventorier(arp={"aa-bb-cc-dd-ee-01": "10.0.0.2"}, resoudre_constructeur=False)
+        res = self.net.inventorier(arp={"aa-bb-cc-dd-ee-01": "10.0.0.2",
+                                        "11-22-33-44-55-66": "10.0.0.77"})
+        self.assertEqual(res["nouveaux"], [{"mac": "11-22-33-44-55-66", "ip": "10.0.0.77",
+                                            "constructeur": None}])
+        self.assertEqual(res["total_connus"], 2)
+
+    def test_constat_remonte_par_le_diagnostic(self):
+        snap = {"agents": [], "alerts": {"total_24h": 5},
+                "stack": {"available": True, "indexer_health": "green"},
+                "errors": [],
+                "network": {"nouveaux": [{"mac": "11-22-33-44-55-66", "ip": "10.0.0.77"}]}}
+        titres = [f["title"] for f in summarizer.findings(snap)]
+        self.assertTrue(any("Nouvel appareil" in t for t in titres), titres)
+
+    def test_pas_de_constat_sans_nouveaute(self):
+        snap = {"agents": [], "alerts": {"total_24h": 5},
+                "stack": {"available": True, "indexer_health": "green"},
+                "errors": [], "network": {"nouveaux": []}}
+        titres = [f["title"] for f in summarizer.findings(snap)]
+        self.assertFalse(any("Nouvel appareil" in t for t in titres))
+
+
 class TestSummaryFreshness(unittest.TestCase):
     """Un bilan ne doit jamais decrire des donnees plus anciennes que le dernier snapshot."""
 

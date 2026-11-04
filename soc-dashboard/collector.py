@@ -395,6 +395,13 @@ def build_snapshot():
     except Exception as exc:
         snap["stack"] = {"available": False, "error": str(exc)[:160]}
 
+    # Reseau local : inventaire ARP, nouvel appareil = constat.
+    try:
+        import network_watch
+        snap["network"] = network_watch.inventorier()
+    except Exception as exc:
+        snap["network"] = {"erreur": "%s: %s" % (exc.__class__.__name__, str(exc)[:120])}
+
     return snap
 
 

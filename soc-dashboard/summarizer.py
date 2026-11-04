@@ -213,6 +213,27 @@ def findings(snapshot):
                         "Ajuster WAZUH_WSL_DISTRO / WAZUH_MANAGER_CONTAINER dans .env"],
         })
 
+    reseau = snapshot.get("network") or {}
+    nouveaux = reseau.get("nouveaux") or []
+    if nouveaux:
+        niveau = (os.environ.get("SOC_NEW_DEVICE_LEVEL") or "eleve").strip().lower()
+        if niveau not in ("critique", "eleve", "moyen", "faible"):
+            niveau = "eleve"
+        out.append({
+            "level": niveau,
+            "title": "Nouvel appareil sur le reseau local : %d" % len(nouveaux),
+            "detail": "Appareil(s) jamais vu(s) dans l'inventaire ARP. Un equipement "
+                      "inconnu sur le LAN merite d'etre identifie : materiel legitime "
+                      "ou intrusion.",
+            "evidence": ", ".join(
+                "%s (%s%s)" % (n.get("ip"), n.get("mac"),
+                               (" — " + n["constructeur"]) if n.get("constructeur") else "")
+                for n in nouveaux[:5]),
+            "actions": ["Identifier les adresses MAC : constructeur via le prefixe OUI",
+                        "Verifier /ip/dhcp-server/lease sur le routeur MikroTik",
+                        "Si inconnu : l'isoler du LAN puis enqueter"],
+        })
+
     return out
 
 
