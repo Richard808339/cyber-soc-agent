@@ -3,211 +3,287 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SOC Console — pilotage des agents</title>
+<title>SOC Console</title>
 <link rel="stylesheet" href="/static/app.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='4' cy='8' r='2' fill='%2322c55e'/><circle cx='8' cy='8' r='2' fill='%2322c55e'/><circle cx='12' cy='8' r='2' fill='%2322c55e'/></svg>">
 </head>
 <body>
 
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
-  <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
-  <symbol id="i-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
-  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
-  <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></symbol>
-  <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
-  <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
-  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
-</svg>
-
-<aside class="rail">
-  <div class="branddot" title="SOC Console">
-    <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2.4" fill="#22c55e"/><circle cx="12" cy="12" r="2.4" fill="#22c55e"/><circle cx="19" cy="12" r="2.4" fill="#22c55e"/></svg>
-  </div>
-  <a class="ricon on" data-view="dashboard" title="Tableau de bord"><svg><use href="#i-grid"/></svg></a>
-  <a class="ricon" data-view="alerts" title="Alertes"><svg><use href="#i-bell"/></svg></a>
-  <a class="ricon" data-view="agents" title="Agents"><svg><use href="#i-cpu"/></svg></a>
-  <a class="ricon" data-view="investigations" title="Investigations"><svg><use href="#i-shield"/></svg></a>
-  <a class="ricon" data-view="reports" title="Rapports"><svg><use href="#i-doc"/></svg></a>
-  <div class="spacer"></div>
-  <a class="ricon" id="btnToken" title="Jeton de lecture"><svg><use href="#i-terminal"/></svg></a>
-  <div class="live-dot" id="railDot" title="Etat de la collecte"></div>
-</aside>
-
 <aside class="side">
-  <div class="side-head"><div class="wordmark">SOC <span>Console</span></div></div>
+  <div class="brand">
+    <span class="dots"><i></i><i></i></span>
+    <b>SOC <span>Console</span></b>
+  </div>
+  <div class="nav-scroll">
+    <div class="sec">Principal</div>
+    <a class="item on" href="#dash" data-view="dash">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+      Tableau de bord</a>
+    <a class="item" href="#assistant" data-view="assistant">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-6.5A8 8 0 0 1 11 4h2a8 8 0 0 1 8 8Z"/></svg>
+      Assistant</a>
+    <a class="item" href="#alerts" data-view="alerts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 9v5M12 17h.01"/></svg>
+      Alertes <span class="n" id="nAlerts">0</span></a>
+    <a class="item" href="#incidents" data-view="incidents">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16h.01"/></svg>
+      Incidents <span class="n bad" id="nIncidents">0</span></a>
+    <a class="item" href="#investigations" data-view="investigations">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      Investigations</a>
+    <a class="item" href="#assets" data-view="assets">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>
+      Ressources <span class="n" id="nAgents">0</span></a>
+    <a class="item" href="#reverse" data-view="reverse">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m9 8-5 4 5 4M15 8l5 4-5 4"/></svg>
+      Ingénierie inverse</a>
+    <a class="item" href="#redteam" data-view="redteam">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg>
+      Red Team</a>
 
-  <div class="side-sec">Pilotage</div>
-  <a class="navitem on" data-view="dashboard"><svg><use href="#i-grid"/></svg> Tableau de bord</a>
-  <a class="navitem" data-view="alerts"><svg><use href="#i-bell"/></svg> Alertes <span class="count alert" id="nAlerts">0</span></a>
-  <a class="navitem" data-view="agents"><svg><use href="#i-cpu"/></svg> Agents <span class="count" id="nAgents">0</span></a>
+    <div class="sec">Rapports</div>
+    <a class="item" href="#reports" data-view="reports">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+      Analytique</a>
+    <a class="item" href="#reports" data-view="reports">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+      Bilan</a>
 
-  <div class="side-sec">Réponse</div>
-  <a class="navitem" data-view="investigations"><svg><use href="#i-shield"/></svg> Investigations</a>
-  <a class="navitem" data-view="reports"><svg><use href="#i-doc"/></svg> Rapports</a>
-
-  <div class="side-foot"><div class="note" id="sideStatus">chargement…</div></div>
+    <div class="sec">Gestion</div>
+    <a class="item" href="#settings" data-view="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+      Paramètres</a>
+  </div>
+  <div class="side-foot">
+    <span class="av">RS</span>
+    <span class="who"><b>Équipe SOC</b><span>en ligne</span></span>
+  </div>
 </aside>
 
 <header class="top">
-  <span class="pill"><span class="pulse"></span> <span id="liveLabel">LIVE</span></span>
-  <span class="meta" id="collected">dernière collecte —</span>
-  <div class="search">
-    <svg width="13" height="13" style="color:#5f7268"><use href="#i-search"/></svg>
-    <input id="q" placeholder="Règle, agent, IP, MITRE…" autocomplete="off">
+  <h1 id="pageTitle">Tableau de bord</h1>
+  <span class="crumb" id="pageCrumb">vue d'ensemble</span>
+  <div class="right">
+    <span class="live"><i></i><span id="liveState">LOCAL</span></span>
+    <a class="pill on" href="#dash" data-view="dash">Tableau de bord</a>
+    <a class="pill" href="#assistant" data-view="assistant">Assistant</a>
+    <a class="pill" href="#reports" data-view="reports">Rapports</a>
+    <button class="round" id="btnRefresh" title="Rafraîchir">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+    </button>
+    <button class="round" id="btnBell" title="Constats">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+    </button>
+    <span class="clock mono" id="clock" style="margin-left:6px"></span>
   </div>
-  <button class="iconbtn" id="btnRefresh" title="Rafraîchir"><svg width="15" height="15"><use href="#i-refresh"/></svg></button>
-  <div class="avatar" id="clock">--:--</div>
 </header>
 
 <main>
-  <!-- ============================ TABLEAU DE BORD ============================ -->
-  <section class="view on" id="view-dashboard">
-    <div class="head">
-      <div><h1>Tableau de bord</h1><p id="dashSub">Situation consolidée du SOC</p></div>
-      <div class="actions">
-        <button class="btn" id="btnSummary">Régénérer le bilan</button>
-        <button class="btn primary" data-view="alerts">Voir les alertes</button>
+  <!-- ------------------------------------------------------------ tableau de bord -->
+  <section class="view on" id="v-dash">
+    <div class="vhead">
+      <div><h2>Tableau de bord</h2><p id="dashSub">posture, volume d'alertes et état de la collecte</p></div>
+      <div class="act">
+        <button class="btn" data-view="alerts">Toutes les alertes</button>
+        <button class="btn pri" data-view="incidents">Voir les incidents</button>
       </div>
     </div>
-
     <div class="kpis" id="kpis"></div>
-
-    <div class="grid cols-32">
+    <div class="grid g-21" style="margin-bottom:10px">
       <div class="panel">
-        <div class="panel-h">
-          <h2>Volume d'alertes</h2><span class="tag" id="volTag">24 h</span>
-          <div class="right"><span class="tag mono" id="volTotal">—</span></div>
-        </div>
-        <div class="panel-b">
-          <svg class="chart" id="volChart"></svg>
-          <div class="legend">
-            <span><i style="background:var(--red)"></i>critique</span>
-            <span><i style="background:var(--amber)"></i>élevé</span>
-            <span><i style="background:#64748b"></i>moyen</span>
+        <div class="ph"><h3>Volume d'alertes</h3><span class="tag">24 h</span>
+          <div class="r"><span class="tag" id="volTotal"></span></div></div>
+        <div class="pb" id="volChart"></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>Répartition par sévérité</h3><div class="r"><span class="tag" id="sevTotal"></span></div></div>
+        <div class="pb"><div class="donut-wrap" id="sevDonut"></div></div>
+      </div>
+    </div>
+    <div class="grid g-3" style="margin-bottom:10px">
+      <div class="panel">
+        <div class="ph"><h3>Règles les plus fréquentes</h3></div>
+        <div class="pb" id="topRules"></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>Tactiques MITRE</h3></div>
+        <div class="pb" id="mitreList"></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>Collecte</h3><div class="r"><span class="tag" id="collState"></span></div></div>
+        <div class="pb" id="collInfo"></div>
+      </div>
+    </div>
+    <div class="grid g-21">
+      <div class="panel">
+        <div class="ph"><h3>Alertes récentes</h3><div class="r"><button class="btn sm" data-view="alerts">tout voir</button></div></div>
+        <div class="pb flush"><table id="recentTable"></table></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>Constats</h3><div class="r"><span class="tag" id="findCount"></span></div></div>
+        <div class="pb flush" id="findList"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------------- assistant -->
+  <section class="view" id="v-assistant">
+    <div class="vhead">
+      <div><h2>Assistant</h2><p>questions sur le snapshot courant — les réponses citent les chiffres réels</p></div>
+      <div class="act"><button class="btn" id="btnNewChat">Nouvelle discussion</button></div>
+    </div>
+    <div class="panel" style="overflow:hidden">
+      <div class="chat">
+        <div class="sessions" id="sessions"></div>
+        <div class="thread">
+          <div class="msgs" id="msgs"></div>
+          <div class="composer">
+            <textarea id="ask" placeholder="Ex. : combien d'alertes critiques sur les 24 dernières heures ? quels agents sont muets ?"></textarea>
+            <button class="btn pri" id="btnAsk">Envoyer</button>
           </div>
         </div>
       </div>
-      <div class="panel">
-        <div class="panel-h"><h2>Répartition</h2><span class="tag">sévérité</span></div>
-        <div class="panel-b">
-          <div class="donut-wrap">
-            <svg class="donut" id="donut" viewBox="0 0 120 120"></svg>
-            <div class="bars-list" id="sevList"></div>
-          </div>
+    </div>
+  </section>
+
+  <!-- --------------------------------------------------------------------- alertes -->
+  <section class="view" id="v-alerts">
+    <div class="vhead">
+      <div><h2>Alertes</h2><p id="alertsSub">banque d'alertes Wazuh</p></div>
+      <div class="act"><button class="btn" id="btnExport">Exporter CSV</button></div>
+    </div>
+    <div class="tiles" id="alertTiles"></div>
+    <div class="bar">
+      <label class="search">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" placeholder="Rechercher une règle, un agent, une description…">
+      </label>
+      <select class="select" id="fSev">
+        <option value="">Toutes les sévérités</option>
+        <option value="crit">Critique (12+)</option>
+        <option value="high">Élevé (8-11)</option>
+        <option value="med">Moyen (4-7)</option>
+        <option value="low">Faible (&lt;4)</option>
+      </select>
+      <select class="select" id="fAgent"><option value="">Tous les agents</option></select>
+      <span class="tag" id="filterCount"></span>
+    </div>
+    <div class="panel"><div class="pb flush"><table id="alertsTable"></table></div></div>
+  </section>
+
+  <!-- ------------------------------------------------------------------- incidents -->
+  <section class="view" id="v-incidents">
+    <div class="vhead">
+      <div><h2>Incidents</h2><p>alertes de niveau 8 et plus — la file de travail de l'analyste</p></div>
+      <div class="act"><button class="btn" id="btnFocus">Ouvrir la file</button></div>
+    </div>
+    <div class="tiles" id="incTiles"></div>
+    <div class="panel"><div class="pb flush"><table id="incTable"></table></div></div>
+  </section>
+
+  <!-- -------------------------------------------------------------- investigations -->
+  <section class="view" id="v-investigations">
+    <div class="vhead">
+      <div><h2>Investigations</h2><p>un playbook par scénario — étapes, commandes, MITRE</p></div>
+    </div>
+    <div class="grid g-12">
+      <div class="panel"><div class="ph"><h3>Playbooks</h3><div class="r"><span class="tag" id="pbCount"></span></div></div>
+        <div class="pb flush" id="pbList"></div></div>
+      <div><div class="panel" style="margin-bottom:10px">
+          <div class="ph"><h3 id="pbTitle">Choisir un playbook</h3><div class="r"><span id="pbSev"></span></div></div>
+          <div class="pb" id="pbHead"><div class="empty">Sélectionnez un playbook à gauche.</div></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h3>Chaîne d'attaque</h3><div class="r"><span class="tag">ordre d'exécution</span></div></div>
+          <div class="chain" id="pbChain"></div>
         </div>
       </div>
     </div>
+  </section>
 
-    <div class="grid cols-32" style="margin-top:12px">
-      <div class="panel">
-        <div class="panel-h"><h2>Alertes récentes</h2><span class="tag">banque d'alertes</span>
-          <div class="right"><button class="btn" data-view="alerts">Tout voir</button></div></div>
-        <div class="panel-b flush"><table>
-          <thead><tr><th>Heure</th><th>Sévérité</th><th>Règle</th><th>Agent</th><th>MITRE</th></tr></thead>
-          <tbody id="recentBody"><tr><td colspan="5" class="empty">chargement…</td></tr></tbody>
-        </table></div>
-      </div>
-      <div class="panel">
-        <div class="panel-h"><h2>Constats</h2><span class="tag">analyse</span></div>
-        <div class="panel-b flush" id="findings"><div class="empty">chargement…</div></div>
-      </div>
+  <!-- ------------------------------------------------------------------ ressources -->
+  <section class="view" id="v-assets">
+    <div class="vhead">
+      <div><h2>Ressources</h2><p>agents du lab, postes Wazuh et état des points de collecte</p></div>
+      <div class="act"><button class="btn" id="btnAgentsRefresh">Sonder l'orchestrateur</button></div>
+    </div>
+    <div class="tiles" id="agentTiles"></div>
+    <div class="cards" id="agentCards"></div>
+    <div class="grid g-2" style="margin-top:10px">
+      <div class="panel"><div class="ph"><h3>Postes Wazuh</h3></div><div class="pb flush"><table id="hostTable"></table></div></div>
+      <div class="panel"><div class="ph"><h3>Dernières tâches de l'orchestrateur</h3></div><div class="pb flush"><table id="taskTable"></table></div></div>
     </div>
   </section>
 
-  <!-- ================================ ALERTES ================================ -->
-  <section class="view" id="view-alerts">
-    <div class="head">
-      <div><h1>Alertes</h1><p id="alertsSub">Banque locale d'alertes</p></div>
-      <div class="actions"><button class="btn" id="btnExport">Exporter CSV</button></div>
+  <!-- ---------------------------------------------------------- ingenierie inverse -->
+  <section class="view" id="v-reverse">
+    <div class="vhead">
+      <div><h2>Ingénierie inverse</h2><p>empreinte, entropie, chaînes et indicateurs — le fichier ne quitte pas la machine</p></div>
     </div>
-    <div class="filters" id="filters">
-      <button class="fchip on" data-level="0">Toutes</button>
-      <button class="fchip" data-level="crit">Critique 12+</button>
-      <button class="fchip" data-level="high">Élevé 8-11</button>
-      <button class="fchip" data-level="mid">Moyen 4-7</button>
-      <button class="fchip" data-level="low">Faible &lt;4</button>
-    </div>
-    <div class="panel"><div class="panel-b flush"><table>
-      <thead><tr><th>Heure</th><th>Sév.</th><th>Règle</th><th>Description</th><th>Agent</th><th>Source</th><th>MITRE</th></tr></thead>
-      <tbody id="alertsBody"><tr><td colspan="7" class="empty">chargement…</td></tr></tbody>
-    </table></div></div>
-  </section>
-
-  <!-- ================================ AGENTS ================================= -->
-  <section class="view" id="view-agents">
-    <div class="head">
-      <div><h1>Agents</h1><p id="agentsSub">Réseau d'agents — orchestrateur local</p></div>
-      <div class="actions"><button class="btn" id="btnAgents">Rafraîchir</button></div>
-    </div>
-    <div class="kpis" id="agentKpis"></div>
-    <div class="acards" id="agentCards"><div class="empty">chargement…</div></div>
-    <div class="panel" style="margin-top:12px">
-      <div class="panel-h"><h2>Dernières tâches</h2><span class="tag">orchestrateur</span></div>
-      <div class="panel-b flush"><table>
-        <thead><tr><th>Tâche</th><th>Capacité</th><th>Agent</th><th>Statut</th><th>Durée</th></tr></thead>
-        <tbody id="taskBody"><tr><td colspan="5" class="empty">chargement…</td></tr></tbody>
-      </table></div>
+    <div class="grid g-12">
+      <div class="panel">
+        <div class="ph"><h3>Échantillon</h3></div>
+        <div class="pb">
+          <div class="field"><label for="revFile">Fichier (≤ 2 Mo)</label><input type="file" id="revFile"></div>
+          <div class="field"><label for="revPath">ou chemin local côté serveur</label><input id="revPath" placeholder="C:\...\sample.bin" autocomplete="off"></div>
+          <button class="btn pri" id="btnRev">Analyser</button>
+          <p class="note" style="margin-top:9px">Aucun envoi vers l'extérieur : l'échantillon est lu en mémoire, les chaînes imprimables sont extraites et passées au jeu de règles local.</p>
+        </div>
+      </div>
+      <div class="panel"><div class="ph"><h3>Résultat</h3><div class="r"><span class="tag" id="revEngine"></span></div></div>
+        <div class="pb" id="revOut"><div class="empty">Aucun échantillon analysé.</div></div></div>
     </div>
   </section>
 
-  <!-- ============================= INVESTIGATIONS ============================ -->
-  <section class="view" id="view-investigations">
-    <div class="head"><div><h1>Investigations</h1><p>Playbooks de réponse et bilan de situation</p></div></div>
-    <div class="grid cols-32">
-      <div class="panel">
-        <div class="panel-h"><h2>Playbooks</h2><span class="tag" id="pbCount">—</span></div>
-        <div class="panel-b flush"><table>
-          <thead><tr><th>Playbook</th><th>Urgence</th><th>Étapes</th><th>MITRE</th></tr></thead>
-          <tbody id="pbBody"><tr><td colspan="4" class="empty">chargement…</td></tr></tbody>
-        </table></div>
-      </div>
-      <div class="panel">
-        <div class="panel-h"><h2>Bilan</h2><span class="tag" id="sumEngine">—</span></div>
-        <div class="panel-b md" id="summary"><div class="empty">chargement…</div></div>
-      </div>
+  <!-- -------------------------------------------------------------------- red team -->
+  <section class="view" id="v-redteam">
+    <div class="vhead">
+      <div><h2>Red Team</h2><p>audit d'exposition de la machine elle-même — aucun balayage vers l'extérieur</p></div>
+      <div class="act"><button class="btn pri" id="btnRed">Lancer l'audit</button></div>
     </div>
+    <div class="panel"><div class="ph"><h3>Contrôles</h3><div class="r"><span class="tag" id="redScore"></span></div></div>
+      <div class="pb flush" id="redOut"><div class="empty">Audit non lancé.</div></div></div>
   </section>
 
-  <!-- ================================ RAPPORTS =============================== -->
-  <section class="view" id="view-reports">
-    <div class="head"><div><h1>Rapports</h1><p>Synthèse de l'état du SOC et de la collecte</p></div></div>
-    <div class="grid cols-2">
-      <div class="panel">
-        <div class="panel-h"><h2>Collecte</h2><span class="tag">fraîcheur</span></div>
-        <div class="panel-b"><dl class="kv" id="collectKv"><dt>—</dt><dd>—</dd></dl></div>
-      </div>
-      <div class="panel">
-        <div class="panel-h"><h2>Répartition par playbook</h2><span class="tag">banque</span></div>
-        <div class="panel-b"><div class="bars-list" id="pbBars"></div></div>
-      </div>
+  <!-- ---------------------------------------------------------------------- bilan -->
+  <section class="view" id="v-reports">
+    <div class="vhead">
+      <div><h2>Analytique</h2><p id="repSub">bilan, répartition et constats</p></div>
+      <div class="act"><button class="btn" id="btnPrint">Imprimer</button></div>
     </div>
-    <div class="panel" style="margin-top:12px">
-      <div class="panel-h"><h2>Constats détaillés</h2><span class="tag">à traiter</span></div>
-      <div class="panel-b flush" id="findingsFull"><div class="empty">chargement…</div></div>
+    <div class="grid g-21" style="margin-bottom:10px">
+      <div class="panel"><div class="ph"><h3 id="repTitle">Bilan</h3><div class="r"><span class="tag" id="repModel"></span></div></div>
+        <div class="pb md" id="repBody"><div class="empty">Chargement…</div></div></div>
+      <div class="panel"><div class="ph"><h3>Par playbook</h3></div><div class="pb" id="repPlay"></div></div>
+    </div>
+    <div class="panel"><div class="ph"><h3>Constats détaillés</h3><div class="r"><span class="tag" id="repFind"></span></div></div>
+      <div class="pb flush" id="repFindList"></div></div>
+  </section>
+
+  <!-- ----------------------------------------------------------------- paramètres -->
+  <section class="view" id="v-settings">
+    <div class="vhead"><div><h2>Paramètres</h2><p>configuration active du tableau de bord</p></div></div>
+    <div class="grid g-2">
+      <div class="panel"><div class="ph"><h3>Services</h3></div><div class="pb" id="setServices"></div></div>
+      <div class="panel"><div class="ph"><h3>Variables d'environnement</h3></div><div class="pb" id="setEnv"></div></div>
     </div>
   </section>
 </main>
 
-<div class="drawer" id="drawer">
-  <div class="drawer-h">
-    <span class="chip" id="dChip">—</span>
-    <strong id="dTitle" style="font-size:12.5px">—</strong>
-    <button class="iconbtn" id="dClose" style="margin-left:auto">✕</button>
-  </div>
-  <div class="drawer-b" id="dBody"></div>
-</div>
+<!-- tiroir de détail -->
+<aside class="drawer" id="drawer">
+  <div class="dh"><b id="drawerTitle">Détail</b><span id="drawerSev" style="margin-left:auto"></span>
+    <button class="round" id="drawerClose">✕</button></div>
+  <div class="tabs" id="drawerTabs"></div>
+  <div class="db" id="drawerBody"></div>
+</aside>
 
 <div class="modal" id="tokenModal">
   <div class="box">
     <h3>Jeton de lecture</h3>
-    <p>Entrez <code>SOC_READ_TOKEN</code>. Il reste dans ce navigateur et n'est jamais stocké côté serveur.</p>
-    <input id="tokenInput" type="password" placeholder="jeton…" autocomplete="off">
+    <p>Ce tableau de bord exige un jeton. Il est conservé dans le navigateur, jamais renvoyé ailleurs.</p>
+    <input id="tokenInput" type="password" placeholder="SOC_READ_TOKEN" autocomplete="off">
     <div class="err" id="tokenErr"></div>
-    <div class="row">
-      <button class="btn primary" id="tokenSave">Enregistrer</button>
-      <button class="btn" id="tokenClear" style="margin-left:auto">Effacer</button>
-    </div>
+    <div class="row"><button class="btn pri" id="tokenOk">Ouvrir</button></div>
   </div>
 </div>
 

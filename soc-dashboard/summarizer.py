@@ -395,6 +395,35 @@ def llm_summary(metrics, timeout=45):
     }
 
 
+def llm_chat(system, user, timeout=45):
+    """Question libre adressee au modele, meme client compatible OpenAI."""
+    key = os.environ.get("SOC_LLM_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("SOC_LLM_API_KEY absent")
+    base = os.environ.get("SOC_LLM_BASE_URL", "https://api.deepseek.com/v1").rstrip("/")
+    model = os.environ.get("SOC_LLM_MODEL", "deepseek-chat")
+    body = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 700,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        base + "/chat/completions", data=body,
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
+    if not text:
+        raise RuntimeError("reponse LLM vide")
+    return {"text": text, "engine": "llm", "model": data.get("model") or model}
+
+
 def summarize(snapshot, prefer_llm=True):
     """Retourne le bilan + les metriques utilisees. Repli automatique sur les regles."""
     metrics = compute_metrics(snapshot)

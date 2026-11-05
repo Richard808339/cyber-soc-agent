@@ -11,10 +11,14 @@ Lancement : python app.py [--port 8765] [--bind 127.0.0.1]
 """
 
 import argparse
+import base64
 import hmac
 import ipaddress
 import json
+import math
 import os
+import re
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
@@ -154,6 +158,42 @@ def lab_snapshot():
     return out
 
 
+def _tcp_ouvert(port, hote="127.0.0.1", delai=0.4):
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(delai)
+        return s.connect_ex((hote, port)) == 0
+
+
+def _ecoutes_publiques():
+    """Ports en LISTEN sur 0.0.0.0, lus dans netstat. Liste vide si indisponible."""
+    try:
+        res = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True,
+                             text=True, errors="replace", timeout=10)
+    except Exception:
+        return []
+    ports = set()
+    for ligne in (res.stdout or "").splitlines():
+        morceaux = ligne.split()
+        if len(morceaux) < 4 or "LISTEN" not in ligne.upper():
+            continue
+        local = morceaux[1]
+        if local.startswith("0.0.0.0:"):
+            try:
+                ports.add(int(local.rsplit(":", 1)[1]))
+            except ValueError:
+                pass
+    return sorted(ports)
+
+
+def is_loopback_bind(host):
+    try:
+        return ipaddress.ip_address(str(host).strip("[]")).is_loopback
+    except ValueError:
+        return str(host).lower() in ("localhost",)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "SocDashboard/1.0"
 
@@ -275,6 +315,9 @@ class Handler(BaseHTTPRequestHandler):
                     "alerts": socstore.alert_stats(),
                 })
 
+            if path == "/api/redteam":
+                return self._send_json(self._redteam())
+
             return self._send_json({"error": "route inconnue"}, 404)
         except Exception as exc:
             return self._send_json({"error": str(exc), "type": exc.__class__.__name__}, 500)
@@ -331,6 +374,21 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/summary/refresh":
             return self._send_json(self._summary(force=True))
+
+        if path in ("/api/assistant", "/api/reverse"):
+            read_token = os.environ.get("SOC_READ_TOKEN", "").strip()
+            if read_token and not self._token_ok(read_token):
+                return self._send_json({"error": "jeton de lecture invalide"}, 401)
+            try:
+                payload = self._read_body()
+            except Exception as exc:
+                return self._send_json({"error": str(exc)}, 400)
+            try:
+                if path == "/api/assistant":
+                    return self._send_json(self._assistant(payload))
+                return self._send_json(self._reverse(payload))
+            except Exception as exc:
+                return self._send_json({"error": str(exc), "type": exc.__class__.__name__}, 400)
 
         return self._send_json({"error": "route inconnue"}, 404)
 
@@ -401,6 +459,287 @@ class Handler(BaseHTTPRequestHandler):
             last = socstore.save_summary(self._build_summary(snap))
         return {"ready": True, "summary": last,
                 "age_seconds": _age_seconds(last.get("generated_at"))}
+
+    # -------------------------------------------------- assistant et analyses
+    def _assistant(self, payload):
+        """Question libre sur le snapshot courant. LLM si configure, sinon regles."""
+        question = str(payload.get("question") or "").strip()[:1200]
+        if not question:
+            raise ValueError("question vide")
+
+        snap = socstore.latest_snapshot() or {}
+        metrics = summarizer.compute_metrics(snap) if snap else {}
+        stats = socstore.alert_stats()
+        agents = snap.get("agents") or []
+        findings = summarizer.findings(snap) if snap else []
+        lab = lab_snapshot()
+        lab_agents = lab.get("agents") or []
+        online = [a for a in lab_agents if a.get("status") == "ONLINE"]
+        age = _age_seconds(snap.get("collected_at"))
+
+        contexte = {
+            "metriques": metrics,
+            "banque_alertes": stats,
+            "collecte": {
+                "age_secondes": age,
+                "collecte_le": snap.get("collected_at"),
+                "erreurs": (snap.get("errors") or [])[:6],
+            },
+            "postes_wazuh": [
+                {"nom": a.get("name"), "statut": a.get("status"), "version": a.get("version")}
+                for a in agents[:20]
+            ],
+            "lab": {"en_ligne": len(online), "total": len(lab_agents),
+                    "joignable": lab.get("available"), "taches": lab.get("tasks_total")},
+            "constats": [{"titre": f.get("title"), "niveau": f.get("level")} for f in findings[:8]],
+            "regles_frequentes": (snap.get("alerts") or {}).get("top_rules", [])[:5],
+        }
+
+        if os.environ.get("SOC_LLM_API_KEY", "").strip():
+            system = (
+                "Tu es analyste SOC. Reponds en francais, uniquement a partir du JSON fourni. "
+                "Si une information n'y figure pas, dis-le sans l'inventer. Cite les chiffres exacts. "
+                "Reponse courte (120 mots maximum), markdown simple, pas de conclusion morale."
+            )
+            user = question + "\n\nDONNEES:\n" + json.dumps(contexte, ensure_ascii=False, default=str)[:6000]
+            try:
+                res = summarizer.llm_chat(system, user)
+                return {"answer": res["text"], "engine": "llm", "model": res.get("model")}
+            except Exception as exc:
+                reponse = self._answer_rules(question, contexte)
+                return {"answer": reponse, "engine": "moteur interne",
+                        "model": "repli (modele indisponible : %s)" % exc}
+
+        return {"answer": self._answer_rules(question, contexte), "engine": "moteur interne",
+                "model": "moteur interne"}
+
+    @staticmethod
+    def _answer_rules(question, ctx):
+        """Reponses calculees depuis le contexte, sans modele ni reseau."""
+        q = question.lower()
+        m = ctx.get("metriques") or {}
+        stats = ctx.get("banque_alertes") or {}
+        coll = ctx.get("collecte") or {}
+        lab = ctx.get("lab") or {}
+        crit = m.get("alerts_critique", 0)
+        eleve = m.get("alerts_eleve", 0)
+        total = stats.get("total", 0)
+
+        def bloc(titre, lignes):
+            return "## %s\n" % titre + "\n".join("- " + l for l in lignes)
+
+        if any(k in q for k in ("critique", "urgent", "grave", "priorit")):
+            lignes = ["%d alerte(s) critique(s) — niveau 12 et plus." % crit,
+                      "%d alerte(s) elevee(s) — niveau 8 a 11." % eleve,
+                      "Score de posture : %s/100." % m.get("score", "inconnu")]
+            if not crit and not eleve:
+                lignes.append("Aucune alerte critique ni elevee sur la fenetre courante.")
+            return bloc("Priorites", lignes)
+
+        if any(k in q for k in ("agent", "lab", "en ligne", "online", "hors ligne")):
+            lignes = ["Lab : %s/%s agents en ligne%s." % (
+                lab.get("en_ligne", 0), lab.get("total", 0),
+                "" if lab.get("joignable") else " (orchestrateur injoignable)")]
+            postes = ctx.get("postes_wazuh") or []
+            for p in postes[:6]:
+                lignes.append("Poste Wazuh %s : %s." % (p.get("nom"), p.get("statut")))
+            if not postes:
+                lignes.append("Aucun poste Wazuh remonte dans le dernier snapshot.")
+            return bloc("Agents", lignes)
+
+        if any(k in q for k in ("collecte", "muet", "indexeur", "vide", "fraich", "age", "stale")):
+            age = coll.get("age_secondes")
+            lignes = ["Dernier snapshot : %s (age %s)." % (coll.get("collecte_le") or "aucun", age)]
+            errs = coll.get("erreurs") or []
+            lignes.append("Erreurs de collecte : %s." % ("; ".join(str(e)[:90] for e in errs) if errs else "aucune"))
+            if m.get("alerts_24h", 0) == 0:
+                lignes.append("Zero alerte sur 24 h : verifier les conteneurs Wazuh et le keepalive des agents.")
+            return bloc("Collecte", lignes)
+
+        if "constat" in q or "probleme" in q or "finding" in q:
+            fs = ctx.get("constats") or []
+            if not fs:
+                return "## Constats\nAucun constat ouvert."
+            return bloc("Constats", ["**%s** (%s)" % (f.get("titre"), f.get("niveau")) for f in fs])
+
+        if any(k in q for k in ("alertes", "combien", "volume", "total")):
+            return bloc("Volume", [
+                "Banque locale : %d alertes." % total,
+                "24 h : %d alerte(s) selon le dernier snapshot." % m.get("alerts_24h", 0),
+                "Critiques : %d — elevees : %d." % (crit, eleve),
+            ])
+
+        if "score" in q or "posture" in q:
+            return bloc("Posture", ["Score %s/100. 100 = aucun signal critique ouvert." % m.get("score", "inconnu"),
+                                    "Actifs : %s/%s postes." % (m.get("agents_active", 0), m.get("agents_total", 0))])
+
+        return ("## Je reponds depuis le snapshot\n"
+                "Sujets couverts : alertes critiques, agents, collecte, constats, volume, posture.\n"
+                "Chiffres disponibles : %d alertes en banque, %d sur 24 h, score %s/100, "
+                "%s/%s agents du lab en ligne." % (
+                    total, m.get("alerts_24h", 0), m.get("score", "inconnu"),
+                    lab.get("en_ligne", 0), lab.get("total", 0)))
+
+    # ------------------------------------------------------ ingenierie inverse
+    LIMITE_ECHANTILLON = 2 * 1024 * 1024
+
+    def _reverse(self, payload):
+        """Analyse d'un echantillon : empreinte, entropie, chaines, indicateurs."""
+        import hashlib
+
+        brut = None
+        nom = str(payload.get("name") or "échantillon")
+        b64 = payload.get("content_b64")
+        chemin = str(payload.get("path") or "").strip()
+
+        if b64:
+            try:
+                brut = base64.b64decode(b64, validate=False)
+            except Exception:
+                raise ValueError("contenu base64 invalide")
+        elif chemin:
+            cible = os.path.realpath(os.path.expanduser(chemin))
+            racine = os.path.realpath(os.path.expanduser("~"))
+            if not cible.startswith(racine):
+                raise ValueError("chemin hors du dossier personnel refusé")
+            if not os.path.isfile(cible):
+                raise ValueError("fichier introuvable")
+            if os.path.getsize(cible) > self.LIMITE_ECHANTILLON:
+                raise ValueError("fichier trop volumineux (2 Mo max)")
+            with open(cible, "rb") as fh:
+                brut = fh.read()
+            nom = os.path.basename(cible)
+        else:
+            raise ValueError("fournir content_b64 ou path")
+
+        if not brut:
+            raise ValueError("échantillon vide")
+        tronque = len(brut) > self.LIMITE_ECHANTILLON
+        donnees = brut[:self.LIMITE_ECHANTILLON]
+
+        sha = hashlib.sha256(donnees).hexdigest()
+        compte = {}
+        for octet in donnees:
+            compte[octet] = compte.get(octet, 0) + 1
+        entropie = 0.0
+        n = len(donnees)
+        for c in compte.values():
+            p = c / n
+            entropie -= p * math.log2(p)
+
+        texte = donnees.decode("latin-1", "replace")
+        chaines = sorted({m for m in re.findall(r"[ -~]{5,}", texte)}, key=len, reverse=True)[:200]
+
+        bas = donnees[:2]
+        if bas == b"MZ":
+            genre = "exécutable Windows (PE)"
+        elif donnees[:2] == bytes([0x7F, 0x45]):
+            genre = "binaire ELF"
+        elif donnees[:4] in (b"%PDF",):
+            genre = "document PDF"
+        elif donnees[:4] == bytes([0x50, 0x4B, 0x03, 0x04]):
+            genre = "archive ZIP/JAR/Office"
+        elif donnees[:2] == bytes([0x1F, 0x8B]):
+            genre = "archive gzip"
+        else:
+            imprimables = sum(1 for b in donnees[:4096] if 32 <= b < 127 or b in (9, 10, 13))
+            genre = "texte" if n and imprimables / min(n, 4096) > .85 else "binaire"
+
+        bas_texte = texte.lower()
+        indicateurs = []
+
+        def note(nom_ind, preuve, gravite="moyenne"):
+            if len(indicateurs) < 40:
+                indicateurs.append({"name": nom_ind, "evidence": preuve[:160], "severity": gravite})
+
+        if bas == b"MZ":
+            note("exécutable Windows", "en-tête MZ", "info")
+        if "upx0" in bas_texte or "upx1" in bas_texte:
+            note("emballage UPX", "section UPX détectée", "haute")
+        if entropie > 7.5 and n > 4096:
+            note("entropie très élevée", "%.2f bits/octet : données chiffrées ou compressées" % entropie, "haute")
+        for api, motif in (
+            ("injection mémoire", ("virtualalloc", "writeprocessmemory", "createremotethread")),
+            ("persistance", ("regsetvalue", "createservice", "schtasks", "run\\", "startup")),
+            ("chiffrement", ("cryptencrypt", "cryptgenkey", "aes_")),
+            ("accès réseau", ("wsaStartup".lower(), "internetopen", "http://", "https://")),
+            ("anti-analyse", ("isdebuggerpresent", "virtualbo", "vmware", "sandbox")),
+            ("shell intégré", ("powershell", "cmd.exe /c", "/bin/sh", "bash -c")),
+        ):
+            for m2 in motif:
+                if m2 in bas_texte:
+                    note(api, "chaîne « %s »" % m2, "haute" if api in ("injection mémoire", "persistance") else "moyenne")
+                    break
+        liens = re.findall(r"""https?://[^\s"'<>]{6,}""", texte)
+        if liens:
+            note("URL intégrée", liens[0], "moyenne")
+        if re.search(r"[A-Za-z0-9+/]{120,}={0,2}", texte):
+            note("bloc base64 long", "chaîne encodée de plus de 120 caractères", "moyenne")
+        if re.search(r"BEGIN (RSA |EC )?PRIVATE KEY", texte):
+            note("clé privée en clair", "en-tête PEM de clé privée", "haute")
+
+        return {
+            "name": nom,
+            "size": len(brut),
+            "truncated": tronque,
+            "sha256": sha,
+            "entropy": round(entropie, 3),
+            "kind": genre,
+            "indicators": indicateurs,
+            "strings": chaines[:60],
+        }
+
+    # ---------------------------------------------------------------- red team
+    def _redteam(self):
+        """Audit d'exposition de la machine : lecture seule, aucun paquet envoye."""
+        controles = []
+
+        def ajout(nom, statut, detail):
+            controles.append({"name": nom, "status": statut, "detail": detail})
+
+        bind = os.environ.get("SOC_BIND", "127.0.0.1")
+        loopback = is_loopback_bind(bind) if "is_loopback_bind" in globals() else bind in ("127.0.0.1", "localhost", "::1")
+        ajout("écoute du tableau de bord", "ok" if loopback else "fail",
+              "bind %s%s" % (bind, "" if loopback else " : accessible depuis le réseau"))
+
+        for var in ("SOC_READ_TOKEN", "SOC_INGEST_TOKEN"):
+            present = bool(os.environ.get(var, "").strip())
+            ajout("jeton %s" % var.lower(), "ok" if present else "warn",
+                  "défini" if present else "vide : endpoints ouverts (toléré seulement en boucle locale)")
+
+        lab_url = os.environ.get("SOC_LAB_URL", "http://127.0.0.1:8000")
+        lab_hote = urllib.parse.urlparse(lab_url).hostname or ""
+        ajout("orchestrateur", "ok" if lab_hote in ("127.0.0.1", "localhost", "::1") else "warn",
+              "cible %s" % lab_url)
+
+        couteux = [p for p in (55000, 9200) if _tcp_ouvert(p)]
+        ajout("services Wazuh en local", "warn" if couteux else "ok",
+              ("ports joignables depuis Windows : %s (attendu en WSL)" % ", ".join(map(str, couteux)))
+              if couteux else "aucun service Wazuh directement joignable")
+
+        vastes = _ecoutes_publiques()
+        ajout("écoutes sur toutes les interfaces", "warn" if vastes else "ok",
+              ("%d port(s) : %s" % (len(vastes), ", ".join(map(str, vastes[:10])))) if vastes else
+              "aucun port en écoute sur 0.0.0.0 d'après netstat")
+
+        ajout("transport du tableau de bord", "warn", "HTTP en clair : acceptable en boucle locale uniquement")
+
+        deps = os.path.join(HERE, "requirements.txt")
+        ajout("dépendances tierces", "ok" if not os.path.exists(deps) else "warn",
+              "aucune (bibliothèque standard seule)" if not os.path.exists(deps) else "requirements.txt présent")
+
+        ignore = os.path.join(HERE, ".gitignore")
+        protege = False
+        if os.path.exists(ignore):
+            with open(ignore, "r", encoding="utf-8", errors="replace") as fh:
+                protege = any(l.strip().lstrip("/") == ".env" for l in fh)
+        ajout(".env protégé par .gitignore", "ok" if protege else "warn",
+              "ignoré par git" if protege else ".gitignore absent ou sans .env")
+
+        return {
+            "checks": controles,
+            "note": "Audit local, lecture seule : aucun paquet envoyé vers l'extérieur, aucun port non sollicité.",
+        }
 
     def log_message(self, fmt, *args):
         if os.environ.get("SOC_QUIET", "1") == "1":

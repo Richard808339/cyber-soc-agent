@@ -77,15 +77,27 @@ python collector.py --loop 60   # toutes les 60 s
 
 ## Ce qu'affiche l'interface
 
-- **KPI** : postes actifs, alertes 24 h, critiques (niveau ≥ 12), vulnérabilités,
-  score de posture 0-100 (couverture des postes − bruit critique).
-- **Alertes sur 24 h** : histogramme horaire issu de l'indexeur.
-- **Règles les plus déclenchées** : top 8 avec barres proportionnelles.
-- **Postes surveillés** : état, système, dernier contact, identifiant d'agent.
-- **Bilan résumé** : texte en français, régénéré quand les données changent.
-- **Vulnérabilités** : volumes par sévérité (`wazuh-states-vulnerabilities-*`).
-- **Flux d'alertes** : filtrable par gravité, chaque ligne ouvre sa piste de réponse
-  (étapes + commandes copiables). Lien direct : `/#pb=brute_force`.
+Console unique, sans dépendance ni build (`static/index.html` + `app.css` + `app.js`),
+découpée en vues :
+
+| Vue | Contenu |
+|---|---|
+| Tableau de bord | KPI, volume d'alertes empilé par sévérité, anneau de répartition, règles et tactiques MITRE, état de collecte, alertes récentes, constats |
+| Assistant | questions libres sur le snapshot (modèle si `SOC_LLM_API_KEY`, sinon moteur de règles qui cite les mêmes chiffres) |
+| Alertes | banque complète, recherche, filtres sévérité et agent, tiroir de détail (champs + playbook de réponse) |
+| Incidents | agrégation des alertes par règle et par poste : une ligne = un incident, avec volume et dernière vue |
+| Investigations | catalogue de playbooks : pourquoi, étapes, commandes copiables, chaîne d'attaque |
+| Ressources | 12 agents du lab (statut, port, capacités), postes Wazuh, dernières tâches de l'orchestrateur |
+| Ingénierie inverse | empreinte SHA-256, entropie, chaînes imprimables, indicateurs (injection, persistance, packer, URL, base64) — l'échantillon reste en mémoire |
+| Red Team | audit d'exposition **local** : bind, jetons, ports en écoute sur `0.0.0.0`, TLS, dépendances, `.env` versionné ou non |
+| Analytique | bilan markdown, répartition par playbook, constats détaillés |
+| Paramètres | services, âge de la collecte, jeton courant |
+
+Détail des KPI : postes actifs, alertes 24 h, critiques, vulnérabilités, score de
+posture 0-100 (couverture des postes − bruit critique). Quand l'indexeur ne répond pas,
+les panneaux basculent sur la banque locale et l'écrivent (« indexeur muet ») au lieu
+d'afficher des zéros silencieux.
+
 
 ## Le bilan : deux moteurs
 
@@ -123,7 +135,14 @@ Les requêtes d'indexeur du catalogue ont été testées sur l'indexeur réel.
 | `GET` | `/api/alerts?level=8&agent=…&playbook=…` | flux filtré |
 | `GET` | `/api/summary` · `POST /api/summary/refresh` | bilan courant / régénération |
 | `GET` | `/api/playbook/<cle>` | piste de réponse complète |
+| `GET` | `/api/lab/agents` | relais vers l'orchestrateur local (agents + tâches) |
+| `GET` | `/api/redteam` | audit d'exposition local (lecture seule) |
+| `POST` | `/api/assistant` | `{question, history?}` → réponse sur le snapshot |
+| `POST` | `/api/reverse` | `{name, content_b64}` ou `{path}` → empreinte, entropie, indicateurs |
 | `GET` | `/api/health` · `/api/history` | santé, historique des collectes |
+
+Les routes `POST /api/assistant` et `POST /api/reverse` exigent le jeton de lecture
+(`X-SOC-Token`), comme les routes de lecture.
 
 ## Sécurité
 
