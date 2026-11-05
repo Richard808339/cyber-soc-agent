@@ -64,6 +64,7 @@ SENSITIVE = [
     (r"(iptables|ip6tables|nft|ufw|firewall-cmd)\s", "critique", "regle de pare-feu"),
     (r"netsh\s+advfirewall\s+(set|add|delete)", "critique", "regle de pare-feu Windows"),
     (r"new-netfirewallrule|remove-netfirewallrule", "critique", "regle de pare-feu Windows"),
+    (r"block_ip\.(ps1|py)\b", "critique", "blocage pare-feu via script SOC"),
     (r"git\s+push", "eleve", "publication de code"),
     (r"git\s+(reset\s+--hard|clean\s+-fd|filter-repo)", "critique", "reecriture d'historique"),
     (r"(rm\s+-rf|rm\s+-r\s+/|del\s+/[sq]|rd\s+/s|remove-item\s+.*-recurse)", "critique",

@@ -380,10 +380,55 @@ Principe : un SOC silencieux n'est pas un SOC sain. Le diagnostic distingue « r
 signaler » de « je ne vois plus rien », ce qui est le piège classique d'un tableau de
 bord qui affiche fièrement « 0 alerte ».
 
+## Blocage d'une IP (pare-feu Windows)
+
+`block_ip.py` bloque ou débloque une adresse via `block_ip.ps1`, **sous approbation
+humaine obligatoire** : la commande est classée `critique` par le broker, enregistrée,
+notifiée, et n'est exécutée qu'après un accord.
+
+```bash
+python block_ip.py block 198.51.100.23 --reason "brute force SSH"
+python block_ip.py block 198.51.100.23 --whatif      # simulation, ne touche à rien
+python block_ip.py unblock 198.51.100.23
+python block_ip.py list
+```
+
+Ce que le script refuse, et pourquoi :
+
+| Refus | Raison |
+|---|---|
+| adresse invalide, `*`, `-`, CIDR plus large qu'un /32 | une valeur floue ferait bloquer tout le trafic |
+| boucle locale, 10/8, 172.16/12, 192.168/16, 169.254/16, 0/8, multicast, réservé | bloquer sa passerelle ou son DHCP coupe le poste du réseau |
+| exécution sans droits administrateur | code de sortie **3**, pas un faux succès |
+
+Codes de sortie : `0` fait, `1` non approuvé ou expiré, `2` adresse refusée,
+`3` privilèges manquants, `4` échec d'exécution. La sortie est un JSON d'une ligne
+(`--json`) utilisable par un appelant automatisé.
+
+**Élévation.** Créer une règle de pare-feu exige un processus administrateur : depuis une
+session normale, `New-NetFirewallRule` répond « Accès refusé » — c'est vérifié sur cette
+machine. Pour un blocage réel, lancer le garde-fou dans une fenêtre élevée (un clic UAC) :
+
+```powershell
+Start-Process powershell -Verb RunAs -ArgumentList "-NoExit","-Command","cd C:\Users\HP\Documents\security\soc-dashboard; py -3 block_ip.py block 198.51.100.23"
+```
+
+La demande d'approbation reste identique (CLI ou Telegram) ; c'est seulement l'exécution
+qui se fait avec les droits. Un jeton ou un webhook ne remplace pas cette élévation.
+
+**Depuis n8n.** Ne pas exposer un webhook qui exécute la règle : le déclencheur crée une
+demande, un humain tranche, puis l'exécution est déclenchée séparément.
+
+```bash
+python block_ip.py block <ip> --no-wait --json     # renvoie {"id": "..."} — rien n'est exécuté
+python broker.py wait <id> --exec                   # après approbation : exécute et renseigne le résultat
+```
+
 ## Tests
 
 ```bash
-python test_soc.py       # 20 tests, aucun accès Wazuh ni clé LLM requis
+python test_soc.py        # 79 tests, serveur HTTP réel en local
+python test_block_ip.py   # 16 tests, aucun pare-feu ni base touchés
 ```
 
 Le chemin « bilan rédigé par un modèle » est vérifié sans clé : `llm_stub.py` est un
