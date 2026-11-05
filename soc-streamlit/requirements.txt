@@ -1,0 +1,4 @@
+# Environnement du tableau de bord Streamlit (separé de soc-dashboard, sans dependance)
+streamlit>=1.66
+pandas>=3.1
+altair>=6.3
