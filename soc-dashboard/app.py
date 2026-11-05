@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -113,6 +114,46 @@ def static_path(rel):
     return candidate
 
 
+LAB_TIMEOUT = float(os.environ.get("SOC_LAB_TIMEOUT", "3"))
+
+
+def lab_snapshot():
+    """Etat du reseau d'agents, lu aupres de l'orchestrateur local.
+
+    Le navigateur ne peut pas appeler l'orchestrateur directement (autre port,
+    pas de CORS) : on relaie ici, et on ne garde que des champs d'affichage.
+    """
+    base = os.environ.get("ORCHESTRATOR_URL", "http://127.0.0.1:8000").rstrip("/")
+    key = os.environ.get("ORCH_KEY", "LAB-ORCH-SECRET")
+    out = {"available": False, "agents": [], "tasks": [], "tasks_total": 0,
+           "tasks_running": 0, "error": None}
+
+    def get(path):
+        request = urllib.request.Request(base + path, headers={"X-Orchestrator-Key": key})
+        with urllib.request.urlopen(request, timeout=LAB_TIMEOUT) as response:
+            return json.loads(response.read() or b"{}")
+
+    try:
+        health = get("/health")
+        data = get("/agents")
+        agents = data.get("agents", data) if isinstance(data, dict) else data
+        tasks = get("/tasks?limit=8")
+        tasks = tasks.get("tasks", tasks) if isinstance(tasks, dict) else tasks
+        out.update({
+            "available": True,
+            "agents": [{k: a.get(k) for k in ("agent_id", "name", "status", "endpoint",
+                                              "capabilities", "last_seen")} for a in agents],
+            "tasks": [{k: t.get(k) for k in ("task_id", "capability", "agent_id", "status",
+                                             "duration_ms", "created_at")} for t in tasks],
+            "tasks_total": health.get("tasks", 0),
+            "tasks_running": sum(1 for t in tasks
+                                 if t.get("status") in ("RUNNING", "PENDING", "QUEUED")),
+        })
+    except Exception as exc:  # noqa: BLE001 - l'orchestrateur peut etre arrete
+        out["error"] = "orchestrateur injoignable (%s)" % type(exc).__name__
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "SocDashboard/1.0"
 
@@ -201,6 +242,9 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/overview":
                 return self._send_json(self._overview())
+
+            if path == "/api/lab/agents":
+                return self._send_json(lab_snapshot())
 
             if path == "/api/alerts":
                 level = query.get("level", [None])[0]

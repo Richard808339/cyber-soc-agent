@@ -234,7 +234,9 @@ class TestStoreAndApi(unittest.TestCase):
             html = r.read().decode("utf-8")
         self.assertEqual(r.status, 200)
         self.assertIn("Tableau de bord", html)
-        self.assertIn("/api/overview", html)
+        # La page est une coquille : donnees et rendu vivent dans app.js, servi
+        # a part. Ce qui compte est que la coquille charge bien ce script.
+        self.assertIn("/static/app.js", html)
 
     def test_5_traversee_de_chemin_refusee(self):
         status, page = self._get("/static/index.html", raw=True)
@@ -264,7 +266,8 @@ class TestStoreAndApi(unittest.TestCase):
             # la page HTML reste servie : c'est elle qui demande le jeton
             status, page = self._get("/", raw=True)
             self.assertEqual(status, 200)
-            self.assertIn("Jeton de lecture requis", page)
+            self.assertIn("tokenModal", page)
+            self.assertIn("Jeton de lecture", page)
         finally:
             os.environ.pop("SOC_READ_TOKEN", None)
 

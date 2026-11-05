@@ -3,461 +3,215 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tableau de bord SOC</title>
-<style>
-  :root{
-    --bg:#080b10; --panel:#0f151d; --panel2:#131b25; --line:#1e2a38;
-    --txt:#e6edf5; --dim:#8b9bb0; --dim2:#5d6e83;
-    --cyan:#22d3ee; --ok:#22c55e; --warn:#f59e0b; --crit:#ef4444; --mid:#eab308; --low:#64748b;
-    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:radial-gradient(1200px 600px at 20% -10%,#10202e 0%,var(--bg) 60%);
-       color:var(--txt);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
-  a{color:var(--cyan)}
-  header{display:flex;align-items:center;gap:16px;padding:16px 22px;border-bottom:1px solid var(--line);
-         background:linear-gradient(180deg,rgba(34,211,238,.06),transparent);position:sticky;top:0;z-index:20;
-         backdrop-filter:blur(6px)}
-  .brand{display:flex;align-items:center;gap:10px;font-weight:650;letter-spacing:.2px}
-  .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 12px var(--ok)}
-  .dot.stale{background:var(--warn);box-shadow:0 0 12px var(--warn)}
-  .meta{margin-left:auto;display:flex;align-items:center;gap:14px;color:var(--dim);font-size:12.5px}
-  .meta b{color:var(--txt);font-weight:600}
-  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--txt);
-         padding:7px 12px;border-radius:8px}
-  button:hover{border-color:var(--cyan);color:var(--cyan)}
-  button.primary{border-color:rgba(34,211,238,.45);background:rgba(34,211,238,.12);color:var(--cyan)}
-  main{padding:20px 22px 60px;max-width:1500px;margin:0 auto}
-  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;margin-bottom:18px}
-  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;position:relative;overflow:hidden}
-  .kpi:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--dim2)}
-  .kpi.crit:before{background:var(--crit)} .kpi.warn:before{background:var(--warn)}
-  .kpi.ok:before{background:var(--ok)} .kpi.cyan:before{background:var(--cyan)}
-  .kpi .k{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
-  .kpi .v{font-size:27px;font-weight:650;margin-top:4px;font-variant-numeric:tabular-nums}
-  .kpi .s{color:var(--dim2);font-size:12px;margin-top:2px}
-  .grid{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;align-items:start}
-  @media(max-width:1080px){.grid{grid-template-columns:1fr}}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:16px;overflow:hidden}
-  .card h2{margin:0;padding:13px 16px;font-size:13px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);
-           border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
-  .card h2 .spacer{margin-left:auto;display:flex;gap:6px}
-  .card .body{padding:16px}
-  .soft{color:var(--dim2);font-size:12px}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th{text-align:left;color:var(--dim2);font-weight:500;font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;
-     padding:8px 10px;border-bottom:1px solid var(--line)}
-  td{padding:9px 10px;border-bottom:1px solid rgba(30,42,56,.55);vertical-align:middle}
-  tr:last-child td{border-bottom:none}
-  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:600;letter-spacing:.3px}
-  .pill.ok{background:rgba(34,197,94,.14);color:#4ade80}
-  .pill.off{background:rgba(239,68,68,.14);color:#f87171}
-  .pill.crit{background:rgba(239,68,68,.16);color:#fca5a5}
-  .pill.high{background:rgba(245,158,11,.16);color:#fcd34d}
-  .pill.mid{background:rgba(234,179,8,.13);color:#fde68a}
-  .pill.low{background:rgba(100,116,139,.18);color:#94a3b8}
-  .bar{height:5px;border-radius:3px;background:var(--crit)}
-  .tl{display:flex;align-items:flex-end;gap:2px;height:96px;margin-top:6px}
-  .tl div{flex:1;background:linear-gradient(180deg,var(--cyan),rgba(34,211,238,.15));border-radius:2px 2px 0 0;min-height:2px;
-          position:relative;transition:filter .15s}
-  .tl div:hover{filter:brightness(1.5)}
-  .feed{max-height:520px;overflow:auto}
-  .alert{display:grid;grid-template-columns:56px 1fr auto;gap:10px;padding:11px 16px;border-bottom:1px solid rgba(30,42,56,.55);
-         cursor:pointer;align-items:start}
-  .alert:hover{background:rgba(34,211,238,.05)}
-  .lvl{font-family:var(--mono);font-weight:700;font-size:15px;text-align:center;border-radius:7px;padding:3px 0}
-  .lvl.crit{color:#fca5a5;background:rgba(239,68,68,.14)}
-  .lvl.high{color:#fcd34d;background:rgba(245,158,11,.14)}
-  .lvl.mid{color:#fde68a;background:rgba(234,179,8,.1)}
-  .lvl.low{color:#94a3b8;background:rgba(100,116,139,.14)}
-  .alert .d{font-weight:550}
-  .alert .m{color:var(--dim2);font-size:12px;margin-top:2px;font-family:var(--mono)}
-  .filters{display:flex;gap:6px;flex-wrap:wrap}
-  .filters button{padding:4px 9px;font-size:12px;border-radius:999px}
-  .filters button.on{border-color:var(--cyan);color:var(--cyan);background:rgba(34,211,238,.12)}
-  #summary{font-size:13.5px;line-height:1.62}
-  #summary h3{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--cyan);margin:16px 0 6px;font-weight:600}
-  #summary h3:first-child{margin-top:0}
-  #summary ul,#summary ol{margin:6px 0;padding-left:20px}
-  #summary li{margin:3px 0}
-  #summary p{margin:6px 0}
-  #summary strong{color:#fff}
-  .badge{font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(34,211,238,.12);color:var(--cyan);
-         border:1px solid rgba(34,211,238,.3)}
-  .modal{position:fixed;inset:0;background:rgba(3,6,10,.72);display:none;align-items:center;justify-content:center;padding:22px;z-index:50}
-  .modal.open{display:flex}
-  .modal .box{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:820px;width:100%;
-              max-height:88vh;overflow:auto;box-shadow:0 30px 80px rgba(0,0,0,.6)}
-  .modal .hd{display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;
-             background:var(--panel);z-index:1}
-  .modal .hd h3{margin:0;font-size:16px}
-  .modal .bd{padding:18px}
-  .cmd{position:relative;background:#060a0f;border:1px solid var(--line);border-radius:8px;padding:10px 44px 10px 12px;
-       font-family:var(--mono);font-size:12.5px;color:#b7f7ff;white-space:pre-wrap;word-break:break-word;margin:6px 0 14px}
-  .cmd button{position:absolute;top:6px;right:6px;padding:3px 8px;font-size:11px}
-  .empty{color:var(--dim2);text-align:center;padding:26px}
-  .finding{display:grid;grid-template-columns:86px 1fr;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(30,42,56,.55)}
-  .finding:last-child{border-bottom:none}
-  .finding .t{font-weight:600;margin-bottom:3px}
-  .finding .d{color:#c3d3e3;font-size:13px}
-  .finding .ev{font-family:var(--mono);font-size:11.5px;color:var(--dim2);margin-top:5px;word-break:break-word}
-  .finding .ac{font-family:var(--mono);font-size:11.5px;color:#8ee7f5;margin-top:6px;padding-left:14px}
-  .finding .ac div:before{content:"› ";color:var(--dim2)}
-  .err{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);color:#fca5a5;padding:10px 14px;
-       border-radius:9px;margin-bottom:14px;font-size:12.5px;font-family:var(--mono)}
-</style>
+<title>SOC Console — pilotage des agents</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='4' cy='8' r='2' fill='%2322c55e'/><circle cx='8' cy='8' r='2' fill='%2322c55e'/><circle cx='12' cy='8' r='2' fill='%2322c55e'/></svg>">
 </head>
 <body>
-<header>
-  <div class="brand"><span class="dot" id="freshDot"></span> SOC — Tableau de bord</div>
-  <div class="meta">
-    <span>Manager <b id="mVersion">—</b></span>
-    <span>Collecte <b id="fresh">—</b></span>
-    <span id="collBadge" class="badge" style="display:none"></span>
-    <button id="btnRefresh" class="primary">Rafraîchir</button>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+</svg>
+
+<aside class="rail">
+  <div class="branddot" title="SOC Console">
+    <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2.4" fill="#22c55e"/><circle cx="12" cy="12" r="2.4" fill="#22c55e"/><circle cx="19" cy="12" r="2.4" fill="#22c55e"/></svg>
   </div>
+  <a class="ricon on" data-view="dashboard" title="Tableau de bord"><svg><use href="#i-grid"/></svg></a>
+  <a class="ricon" data-view="alerts" title="Alertes"><svg><use href="#i-bell"/></svg></a>
+  <a class="ricon" data-view="agents" title="Agents"><svg><use href="#i-cpu"/></svg></a>
+  <a class="ricon" data-view="investigations" title="Investigations"><svg><use href="#i-shield"/></svg></a>
+  <a class="ricon" data-view="reports" title="Rapports"><svg><use href="#i-doc"/></svg></a>
+  <div class="spacer"></div>
+  <a class="ricon" id="btnToken" title="Jeton de lecture"><svg><use href="#i-terminal"/></svg></a>
+  <div class="live-dot" id="railDot" title="Etat de la collecte"></div>
+</aside>
+
+<aside class="side">
+  <div class="side-head"><div class="wordmark">SOC <span>Console</span></div></div>
+
+  <div class="side-sec">Pilotage</div>
+  <a class="navitem on" data-view="dashboard"><svg><use href="#i-grid"/></svg> Tableau de bord</a>
+  <a class="navitem" data-view="alerts"><svg><use href="#i-bell"/></svg> Alertes <span class="count alert" id="nAlerts">0</span></a>
+  <a class="navitem" data-view="agents"><svg><use href="#i-cpu"/></svg> Agents <span class="count" id="nAgents">0</span></a>
+
+  <div class="side-sec">Réponse</div>
+  <a class="navitem" data-view="investigations"><svg><use href="#i-shield"/></svg> Investigations</a>
+  <a class="navitem" data-view="reports"><svg><use href="#i-doc"/></svg> Rapports</a>
+
+  <div class="side-foot"><div class="note" id="sideStatus">chargement…</div></div>
+</aside>
+
+<header class="top">
+  <span class="pill"><span class="pulse"></span> <span id="liveLabel">LIVE</span></span>
+  <span class="meta" id="collected">dernière collecte —</span>
+  <div class="search">
+    <svg width="13" height="13" style="color:#5f7268"><use href="#i-search"/></svg>
+    <input id="q" placeholder="Règle, agent, IP, MITRE…" autocomplete="off">
+  </div>
+  <button class="iconbtn" id="btnRefresh" title="Rafraîchir"><svg width="15" height="15"><use href="#i-refresh"/></svg></button>
+  <div class="avatar" id="clock">--:--</div>
 </header>
 
 <main>
-  <div id="errors"></div>
-
-  <div class="kpis" id="kpis"></div>
-
-  <div class="card" id="diagCard" style="display:none">
-    <h2>Diagnostic du SOC <span class="spacer"><span class="soft" id="diagHint"></span></span></h2>
-    <div class="body" style="padding:0" id="diag"></div>
-  </div>
-
-  <div class="grid">
-    <div>
-      <div class="card">
-        <h2>Alertes sur 24 h <span class="spacer"><span class="soft" id="tlHint"></span></span></h2>
-        <div class="body"><div class="tl" id="timeline"></div></div>
-      </div>
-
-      <div class="card">
-        <h2>Règles les plus déclenchées</h2>
-        <div class="body" id="topRules"><div class="empty">—</div></div>
-      </div>
-
-      <div class="card">
-        <h2>Postes surveillés <span class="spacer"><span class="soft" id="agentsHint"></span></span></h2>
-        <div class="body" style="padding:0"><div id="agents"></div></div>
+  <!-- ============================ TABLEAU DE BORD ============================ -->
+  <section class="view on" id="view-dashboard">
+    <div class="head">
+      <div><h1>Tableau de bord</h1><p id="dashSub">Situation consolidée du SOC</p></div>
+      <div class="actions">
+        <button class="btn" id="btnSummary">Régénérer le bilan</button>
+        <button class="btn primary" data-view="alerts">Voir les alertes</button>
       </div>
     </div>
 
-    <div>
-      <div class="card">
-        <h2>Bilan résumé <span class="spacer">
-          <span class="badge" id="engineBadge">—</span>
-          <button id="btnSummary">Régénérer</button></span></h2>
-        <div class="body" id="summary"><div class="empty">En attente de données…</div></div>
-      </div>
+    <div class="kpis" id="kpis"></div>
 
-      <div class="card">
-        <h2>Vulnérabilités</h2>
-        <div class="body" id="vulns"><div class="empty">—</div></div>
+    <div class="grid cols-32">
+      <div class="panel">
+        <div class="panel-h">
+          <h2>Volume d'alertes</h2><span class="tag" id="volTag">24 h</span>
+          <div class="right"><span class="tag mono" id="volTotal">—</span></div>
+        </div>
+        <div class="panel-b">
+          <svg class="chart" id="volChart"></svg>
+          <div class="legend">
+            <span><i style="background:var(--red)"></i>critique</span>
+            <span><i style="background:var(--amber)"></i>élevé</span>
+            <span><i style="background:#64748b"></i>moyen</span>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h2>Répartition</h2><span class="tag">sévérité</span></div>
+        <div class="panel-b">
+          <div class="donut-wrap">
+            <svg class="donut" id="donut" viewBox="0 0 120 120"></svg>
+            <div class="bars-list" id="sevList"></div>
+          </div>
+        </div>
       </div>
     </div>
-  </div>
 
-  <div class="card" style="margin-top:0">
-    <h2>Flux d'alertes
-      <span class="spacer">
-        <span class="filters" id="filters">
-          <button class="on" data-lvl="0">Tout</button>
-          <button data-lvl="12">Critiques</button>
-          <button data-lvl="8">Élevées+</button>
-          <button data-lvl="4">Moyennes+</button>
-        </span>
-      </span>
-    </h2>
-    <div class="feed" id="feed"><div class="empty">Aucune alerte ingérée.</div></div>
-  </div>
+    <div class="grid cols-32" style="margin-top:12px">
+      <div class="panel">
+        <div class="panel-h"><h2>Alertes récentes</h2><span class="tag">banque d'alertes</span>
+          <div class="right"><button class="btn" data-view="alerts">Tout voir</button></div></div>
+        <div class="panel-b flush"><table>
+          <thead><tr><th>Heure</th><th>Sévérité</th><th>Règle</th><th>Agent</th><th>MITRE</th></tr></thead>
+          <tbody id="recentBody"><tr><td colspan="5" class="empty">chargement…</td></tr></tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h2>Constats</h2><span class="tag">analyse</span></div>
+        <div class="panel-b flush" id="findings"><div class="empty">chargement…</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================ ALERTES ================================ -->
+  <section class="view" id="view-alerts">
+    <div class="head">
+      <div><h1>Alertes</h1><p id="alertsSub">Banque locale d'alertes</p></div>
+      <div class="actions"><button class="btn" id="btnExport">Exporter CSV</button></div>
+    </div>
+    <div class="filters" id="filters">
+      <button class="fchip on" data-level="0">Toutes</button>
+      <button class="fchip" data-level="crit">Critique 12+</button>
+      <button class="fchip" data-level="high">Élevé 8-11</button>
+      <button class="fchip" data-level="mid">Moyen 4-7</button>
+      <button class="fchip" data-level="low">Faible &lt;4</button>
+    </div>
+    <div class="panel"><div class="panel-b flush"><table>
+      <thead><tr><th>Heure</th><th>Sév.</th><th>Règle</th><th>Description</th><th>Agent</th><th>Source</th><th>MITRE</th></tr></thead>
+      <tbody id="alertsBody"><tr><td colspan="7" class="empty">chargement…</td></tr></tbody>
+    </table></div></div>
+  </section>
+
+  <!-- ================================ AGENTS ================================= -->
+  <section class="view" id="view-agents">
+    <div class="head">
+      <div><h1>Agents</h1><p id="agentsSub">Réseau d'agents — orchestrateur local</p></div>
+      <div class="actions"><button class="btn" id="btnAgents">Rafraîchir</button></div>
+    </div>
+    <div class="kpis" id="agentKpis"></div>
+    <div class="acards" id="agentCards"><div class="empty">chargement…</div></div>
+    <div class="panel" style="margin-top:12px">
+      <div class="panel-h"><h2>Dernières tâches</h2><span class="tag">orchestrateur</span></div>
+      <div class="panel-b flush"><table>
+        <thead><tr><th>Tâche</th><th>Capacité</th><th>Agent</th><th>Statut</th><th>Durée</th></tr></thead>
+        <tbody id="taskBody"><tr><td colspan="5" class="empty">chargement…</td></tr></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- ============================= INVESTIGATIONS ============================ -->
+  <section class="view" id="view-investigations">
+    <div class="head"><div><h1>Investigations</h1><p>Playbooks de réponse et bilan de situation</p></div></div>
+    <div class="grid cols-32">
+      <div class="panel">
+        <div class="panel-h"><h2>Playbooks</h2><span class="tag" id="pbCount">—</span></div>
+        <div class="panel-b flush"><table>
+          <thead><tr><th>Playbook</th><th>Urgence</th><th>Étapes</th><th>MITRE</th></tr></thead>
+          <tbody id="pbBody"><tr><td colspan="4" class="empty">chargement…</td></tr></tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h2>Bilan</h2><span class="tag" id="sumEngine">—</span></div>
+        <div class="panel-b md" id="summary"><div class="empty">chargement…</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================ RAPPORTS =============================== -->
+  <section class="view" id="view-reports">
+    <div class="head"><div><h1>Rapports</h1><p>Synthèse de l'état du SOC et de la collecte</p></div></div>
+    <div class="grid cols-2">
+      <div class="panel">
+        <div class="panel-h"><h2>Collecte</h2><span class="tag">fraîcheur</span></div>
+        <div class="panel-b"><dl class="kv" id="collectKv"><dt>—</dt><dd>—</dd></dl></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h2>Répartition par playbook</h2><span class="tag">banque</span></div>
+        <div class="panel-b"><div class="bars-list" id="pbBars"></div></div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <div class="panel-h"><h2>Constats détaillés</h2><span class="tag">à traiter</span></div>
+      <div class="panel-b flush" id="findingsFull"><div class="empty">chargement…</div></div>
+    </div>
+  </section>
 </main>
 
+<div class="drawer" id="drawer">
+  <div class="drawer-h">
+    <span class="chip" id="dChip">—</span>
+    <strong id="dTitle" style="font-size:12.5px">—</strong>
+    <button class="iconbtn" id="dClose" style="margin-left:auto">✕</button>
+  </div>
+  <div class="drawer-b" id="dBody"></div>
+</div>
+
 <div class="modal" id="tokenModal">
-  <div class="box" style="max-width:520px">
-    <div class="hd"><h3>Jeton de lecture requis</h3></div>
-    <div class="bd">
-      <p style="margin-top:0;color:#cfe4f5">Ce tableau de bord est protégé. Saisis la valeur de
-        <code>SOC_READ_TOKEN</code> (fichier <code>.env</code> du serveur).</p>
-      <input id="tokenInput" type="password" autocomplete="off" placeholder="jeton de lecture"
-        style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--line);
-               background:#060a0f;color:var(--txt);font-family:var(--mono);font-size:13px">
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-        <button id="tokenClear">Effacer</button>
-        <button id="tokenSave" class="primary">Valider</button>
-      </div>
-      <div class="soft" id="tokenErr" style="margin-top:10px"></div>
-    </div>
-  </div>
-</div>
-
-<div class="modal" id="modal">
   <div class="box">
-    <div class="hd">
-      <h3 id="mTitle">Piste de réponse</h3>
-      <span class="badge" id="mUrg"></span>
-      <span class="spacer" style="margin-left:auto"></span>
-      <button id="mClose">Fermer</button>
+    <h3>Jeton de lecture</h3>
+    <p>Entrez <code>SOC_READ_TOKEN</code>. Il reste dans ce navigateur et n'est jamais stocké côté serveur.</p>
+    <input id="tokenInput" type="password" placeholder="jeton…" autocomplete="off">
+    <div class="err" id="tokenErr"></div>
+    <div class="row">
+      <button class="btn primary" id="tokenSave">Enregistrer</button>
+      <button class="btn" id="tokenClear" style="margin-left:auto">Effacer</button>
     </div>
-    <div class="bd" id="mBody"></div>
   </div>
 </div>
 
-<script>
-const $ = s => document.querySelector(s);
-const LEVEL_CLASS = l => l >= 12 ? 'crit' : l >= 8 ? 'high' : l >= 4 ? 'mid' : 'low';
-let state = {overview:null, filter:0};
-
-// --- Jeton de lecture (SOC_READ_TOKEN) -------------------------------------
-const TOKEN_KEY = 'soc_read_token';
-const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
-function apiFetch(url, opts = {}){
-  opts.headers = Object.assign({}, opts.headers || {}, getToken() ? {'X-SOC-Token': getToken()} : {});
-  return fetch(url, opts);
-}
-// Un lien du type /#token=... memorise le jeton sans l'envoyer au serveur.
-if(location.hash.startsWith('#token=')){
-  localStorage.setItem(TOKEN_KEY, decodeURIComponent(location.hash.slice(7)));
-  history.replaceState(null, '', location.pathname);
-}
-function askToken(msg){
-  $('#tokenErr').textContent = msg || '';
-  $('#tokenInput').value = '';
-  $('#tokenModal').classList.add('open');
-  setTimeout(() => $('#tokenInput').focus(), 50);
-}
-$('#tokenSave').onclick = () => {
-  const v = $('#tokenInput').value.trim();
-  if(!v){ $('#tokenErr').textContent = 'Jeton vide.'; return; }
-  localStorage.setItem(TOKEN_KEY, v);
-  $('#tokenModal').classList.remove('open');
-  load();
-};
-$('#tokenClear').onclick = () => { localStorage.removeItem(TOKEN_KEY); askToken('Jeton effacé.'); };
-$('#tokenInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('#tokenSave').click(); });
-
-function fmtAge(s){
-  if(s == null) return 'jamais';
-  if(s < 90) return 'il y a ' + s + ' s';
-  if(s < 5400) return 'il y a ' + Math.round(s/60) + ' min';
-  return 'il y a ' + Math.round(s/3600) + ' h';
-}
-function esc(t){return String(t ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-
-function mdRender(md){
-  const lines = String(md || '').split('\n');
-  let out = '', listMode = null, olNum = 0;
-  const close = () => { if(listMode){ out += '</' + listMode + '>'; listMode = null; } };
-  for(let raw of lines){
-    const line = raw.trim();
-    if(!line){ close(); continue; }
-    const inline = line.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/`([^`]+)`/g,'<code>$1</code>');
-    if(line.startsWith('## ') || line.startsWith('### ')){
-      close(); out += '<h3>' + esc(line.replace(/^#+\s*/,'')) + '</h3>'; continue;
-    }
-    const ol = line.match(/^(\d+)\.\s+(.*)$/), ul = line.match(/^[-*]\s+(.*)$/);
-    if(ol){ if(listMode !== 'ol'){ close(); out += '<ol>'; listMode='ol'; } out += '<li>' + inline.replace(/^\d+\.\s*/,'') + '</li>'; continue; }
-    if(ul){ if(listMode !== 'ul'){ close(); out += '<ul>'; listMode='ul'; } out += '<li>' + inline + '</li>'; continue; }
-    close(); out += '<p>' + inline + '</p>';
-  }
-  close();
-  return out;
-}
-
-function renderKpis(o){
-  const k = o.kpi;
-  const scoreClass = k.score >= 80 ? 'ok' : k.score >= 55 ? 'warn' : 'crit';
-  const cards = [
-    ['cyan', 'Postes actifs', k.agents_active + '/' + k.agents_total, 'agents Wazuh enregistrés'],
-    [k.alerts_critique ? 'crit' : '', 'Alertes 24 h', k.alerts_24h, (k.alerts_critique + k.alerts_eleve) + ' critiques/élevées'],
-    ['crit', 'Critiques', k.alerts_critique, 'niveau ≥ 12'],
-    [k.vulns_critique ? 'crit' : '', 'Vulnérabilités', k.vulns_total, k.vulns_critique + ' critiques'],
-    [scoreClass, 'Score de posture', k.score + '/100', 'couverture + bruit critique'],
-  ];
-  $('#kpis').innerHTML = cards.map(([cls,label,val,sub]) =>
-    `<div class="kpi ${cls}"><div class="k">${esc(label)}</div><div class="v">${esc(val)}</div><div class="s">${esc(sub)}</div></div>`
-  ).join('');
-}
-
-function renderTimeline(o){
-  const t = o.timeline || [];
-  $('#tlHint').textContent = t.length ? t.length + ' heures' : '';
-  if(!t.length){ $('#timeline').innerHTML = '<div class="empty" style="width:100%">Pas de série temporelle</div>'; return; }
-  const max = Math.max(1, ...t.map(x => x.count));
-  $('#timeline').innerHTML = t.map(x => {
-    const h = Math.max(2, Math.round(x.count / max * 92));
-    const label = x.ts ? String(x.ts).slice(11,16) : '';
-    return `<div style="height:${h}px" title="${esc(label)} — ${x.count} alertes"></div>`;
-  }).join('');
-}
-
-function renderTopRules(o){
-  const r = o.top_rules || [];
-  if(!r.length){ $('#topRules').innerHTML = '<div class="empty">Aucune règle déclenchée</div>'; return; }
-  const max = Math.max(...r.map(x => x.count));
-  $('#topRules').innerHTML = '<table>' + r.slice(0,8).map(x => `
-    <tr><td style="width:52px" class="soft">${x.count}</td>
-        <td><div style="margin-bottom:3px">${esc(x.key)}</div>
-            <div class="bar" style="width:${Math.round(x.count/max*100)}%"></div></td></tr>`).join('') + '</table>';
-}
-
-function renderDiagnostics(o){
-  const f = o.findings || [];
-  $('#diagCard').style.display = f.length ? 'block' : 'none';
-  if(!f.length){ $('#diag').innerHTML = ''; return; }
-  $('#diagHint').textContent = f.length + ' constat(s)';
-  const cls = lvl => lvl === 'critique' ? 'crit' : lvl === 'eleve' ? 'high' : lvl === 'moyen' ? 'mid' : 'low';
-  $('#diag').innerHTML = f.map(x => `
-    <div class="finding">
-      <div><span class="pill ${cls(x.level)}">${esc(x.level)}</span></div>
-      <div>
-        <div class="t">${esc(x.title)}</div>
-        <div class="d">${esc(x.detail)}</div>
-        <div class="ev">preuve : ${esc(x.evidence || '—')}</div>
-        <div class="ac">${(x.actions || []).map(a => '<div>' + esc(a) + '</div>').join('')}</div>
-      </div>
-    </div>`).join('');
-}
-
-function renderAgents(o){
-  const a = o.agents || [];
-  const st = o.stack || {};
-  const parts = [];
-  if(st.containers && st.containers.length) parts.push(st.containers.length + ' conteneur(s)');
-  if(st.indexer_health) parts.push('indexeur ' + st.indexer_health);
-  $('#agentsHint').textContent = a.length + ' enregistré(s)' + (parts.length ? ' · ' + parts.join(' · ') : '');
-  if(!a.length){ $('#agents').innerHTML = '<div class="empty">Aucun poste remonté</div>'; return; }
-  $('#agents').innerHTML = '<table><thead><tr><th>Poste</th><th>État</th><th>Système</th><th>Dernier contact</th><th>ID</th></tr></thead><tbody>' +
-    a.map(x => {
-      const ok = (x.status || '').toLowerCase() === 'active';
-      const ka = x.last_keepalive && x.last_keepalive.startsWith('9999') ? 'manager local' : (x.last_keepalive || '—').replace('T',' ').slice(0,19);
-      return `<tr><td><b>${esc(x.name)}</b></td>
-        <td><span class="pill ${ok?'ok':'off'}">${esc(x.status || 'inconnu')}</span></td>
-        <td class="soft">${esc((x.os || '') + ' ' + (x.os_version || '')).trim()}</td>
-        <td class="soft">${esc(ka)}</td>
-        <td class="soft" style="font-family:var(--mono)">${esc(x.id || '')}</td></tr>`;
-    }).join('') + '</tbody></table>';
-}
-
-function renderVulns(o){
-  const v = o.vulnerabilities || {};
-  const sev = v.by_severity || {};
-  const entries = Object.entries(sev).sort((a,b) => b[1]-a[1]);
-  if(!v.total && !entries.length){ $('#vulns').innerHTML = '<div class="empty">Aucune vulnérabilité remontée</div>'; return; }
-  $('#vulns').innerHTML = `<div class="soft" style="margin-bottom:8px">${v.total} vulnérabilité(s) dans l'inventaire</div>` +
-    (entries.length ? '<table>' + entries.map(([k,n]) => {
-      const cls = /crit/i.test(k) ? 'crit' : /high|élev/i.test(k) ? 'high' : /med|moy/i.test(k) ? 'mid' : 'low';
-      return `<tr><td><span class="pill ${cls}">${esc(k)}</span></td><td style="text-align:right" class="soft">${n}</td></tr>`;
-    }).join('') + '</table>' : '<div class="soft">Inventaire présent mais sans sévérité exploitable.</div>') +
-    (v.error ? `<div class="soft" style="margin-top:8px">${esc(v.error)}</div>` : '');
-}
-
-function renderSummary(o){
-  const s = o.summary || {};
-  $('#engineBadge').textContent = s.engine ? (s.engine === 'llm' ? 'LLM · ' + (s.model || '') : 'moteur de règles') : '—';
-  if(!s.text){ $('#summary').innerHTML = '<div class="empty">Bilan pas encore généré</div>'; return; }
-  $('#summary').innerHTML = mdRender(s.text) +
-    `<div class="soft" style="margin-top:12px">Généré ${esc((s.generated_at || '').replace('T',' ').slice(0,16))} UTC</div>`;
-}
-
-function renderFeed(o){
-  const alerts = (o.recent_alerts || []).filter(a => !state.filter || a.level >= state.filter);
-  if(!alerts.length){ $('#feed').innerHTML = '<div class="empty">Aucune alerte à ce niveau.</div>'; return; }
-  $('#feed').innerHTML = alerts.map(a => {
-    const cls = LEVEL_CLASS(a.level);
-    const mt = (a.mitre_ids || []).join(' ');
-    return `<div class="alert" data-pb="${esc(a.playbook || 'generic_high')}" data-lvl="${a.level}">
-      <div class="lvl ${cls}">${a.level}</div>
-      <div><div class="d">${esc(a.description || '')}</div>
-        <div class="m">${esc(a.agent || '—')} · ${esc((a.ts || '').replace('T',' ').slice(0,19))} règle ${esc(a.rule_id || '')}${mt ? ' · ' + esc(mt) : ''}</div></div>
-      <div><button class="pbBtn" data-pb="${esc(a.playbook || 'generic_high')}">Réponse</button></div>
-    </div>`;
-  }).join('');
-  document.querySelectorAll('.pbBtn').forEach(b => b.onclick = ev => { ev.stopPropagation(); openPlaybook(b.dataset.pb); });
-  document.querySelectorAll('.alert').forEach(el => el.onclick = () => openPlaybook(el.dataset.pb));
-}
-
-async function openPlaybook(key){
-  $('#mTitle').textContent = 'Piste de réponse';
-  $('#mBody').innerHTML = '<div class="empty">Chargement…</div>';
-  $('#modal').classList.add('open');
-  try{
-    const r = await apiFetch('/api/playbook/' + encodeURIComponent(key));
-    const {playbook:p} = await r.json();
-    $('#mTitle').textContent = p.title;
-    $('#mUrg').textContent = 'urgence ' + p.urgency;
-    const cmds = (p.commands || []).map(c => `
-      <div class="soft" style="margin-top:4px">${esc(c.label)} <span style="opacity:.7">[${esc(c.os)}]</span></div>
-      <div class="cmd">${esc(c.cmd)}<button data-copy="${esc(c.cmd)}">Copier</button></div>`).join('');
-    $('#mBody').innerHTML = `
-      <p style="margin-top:0;color:#cfe4f5">${esc(p.why)}</p>
-      ${p.mitre && p.mitre.length ? '<div class="soft">MITRE : ' + p.mitre.map(esc).join(' · ') + '</div>' : ''}
-      <h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--cyan);margin:18px 0 6px">Étapes</h3>
-      <ol style="padding-left:20px">${p.steps.map(s => '<li style="margin:4px 0">' + esc(s) + '</li>').join('')}</ol>
-      <h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--cyan);margin:18px 0 6px">Commandes</h3>
-      ${cmds}
-      <div class="soft">Rien n'est exécuté automatiquement : ces commandes sont à lancer par l'analyste.</div>`;
-    document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async e => {
-      e.stopPropagation();
-      try{ await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copié'; }
-      catch(err){ b.textContent = 'Ctrl+C'; }
-      setTimeout(() => b.textContent = 'Copier', 1500);
-    });
-  }catch(err){
-    $('#mBody').innerHTML = '<div class="empty">Piste indisponible : ' + esc(err.message) + '</div>';
-  }
-}
-
-function render(o){
-  state.overview = o;
-  $('#freshDot').className = 'dot' + (o.stale ? ' stale' : '');
-  $('#fresh').textContent = fmtAge(o.age_seconds) + (o.stale ? ' (périmé)' : '');
-  $('#mVersion').textContent = (o.manager && o.manager.version) || '—';
-  $('#collBadge').style.display = 'inline-block';
-  $('#collBadge').textContent = (o.collector && o.collector.host) ? 'collecte: ' + o.collector.host : '';
-  $('#errors').innerHTML = (o.errors && o.errors.length)
-    ? o.errors.map(e => '<div class="err">collecteur : ' + esc(e) + '</div>').join('') : '';
-  renderKpis(o); renderDiagnostics(o); renderTimeline(o); renderTopRules(o); renderAgents(o);
-  renderVulns(o); renderSummary(o); renderFeed(o);
-}
-
-async function load(){
-  try{
-    const r = await apiFetch('/api/overview');
-    if(r.status === 401){ askToken('Jeton absent ou invalide.'); return; }
-    const o = await r.json();
-    if(!o.ready){ $('#summary').innerHTML = '<div class="empty">' + esc(o.message) + '</div>'; return; }
-    render(o);
-  }catch(err){
-    $('#errors').innerHTML = '<div class="err">tableau de bord injoignable : ' + esc(err.message) + '</div>';
-  }
-}
-
-$('#btnRefresh').onclick = load;
-$('#btnSummary').onclick = async () => {
-  $('#btnSummary').textContent = 'Génération…';
-  try{
-    await apiFetch('/api/summary/refresh', {method:'POST'});
-    await load();
-  } finally { $('#btnSummary').textContent = 'Régénérer'; }
-};
-$('#mClose').onclick = () => $('#modal').classList.remove('open');
-$('#modal').onclick = e => { if(e.target.id === 'modal') $('#modal').classList.remove('open'); };
-document.addEventListener('keydown', e => { if(e.key === 'Escape') $('#modal').classList.remove('open'); });
-document.querySelectorAll('#filters button').forEach(b => b.onclick = () => {
-  document.querySelectorAll('#filters button').forEach(x => x.classList.remove('on'));
-  b.classList.add('on');
-  state.filter = parseInt(b.dataset.lvl, 10) || 0;
-  if(state.overview) renderFeed(state.overview);
-});
-
-load();
-setInterval(load, 60000);
-// Lien profond : http://127.0.0.1:8765/#pb=brute_force ouvre directement la piste de réponse.
-if (location.hash.startsWith('#pb=')) openPlaybook(decodeURIComponent(location.hash.slice(4)));
-</script>
+<div class="toast" id="toast"></div>
+<script src="/static/app.js"></script>
 </body>
 </html>
