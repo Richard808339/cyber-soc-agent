@@ -840,5 +840,43 @@ class TestSummaryFreshness(unittest.TestCase):
         self.assertTrue(self.app._summary_is_stale(None, {"collected_at": self._iso(1)}))
 
 
+class TestOpenEndpointGuard(unittest.TestCase):
+    """Un bind reseau avec un jeton vide doit empecher le demarrage.
+
+    L'API etait ouverte par defaut, avec pour seule trace une ligne dans la
+    banniere de demarrage. Une banniere ne protege rien : la regle est
+    desormais bloquante, sauf choix explicite.
+    """
+
+    def setUp(self):
+        import app
+        self.app = app
+
+    def test_boucle_locale_accepte_les_jetons_vides(self):
+        for host in ("127.0.0.1", "localhost", "::1", ""):
+            self.assertEqual(self.app.open_endpoint_tokens(host, {}), [], host)
+
+    def test_bind_reseau_sans_jeton_refuse(self):
+        self.assertEqual(
+            self.app.open_endpoint_tokens("0.0.0.0", {}),
+            ["SOC_READ_TOKEN", "SOC_INGEST_TOKEN"])
+
+    def test_bind_reseau_avec_un_seul_jeton_refuse(self):
+        self.assertEqual(
+            self.app.open_endpoint_tokens("10.10.5.45", {"SOC_INGEST_TOKEN": "x"}),
+            ["SOC_READ_TOKEN"])
+
+    def test_bind_reseau_avec_les_deux_jetons_accepte(self):
+        env = {"SOC_READ_TOKEN": "a", "SOC_INGEST_TOKEN": "b"}
+        self.assertEqual(self.app.open_endpoint_tokens("0.0.0.0", env), [])
+
+    def test_ouverture_assumee_explicitement(self):
+        env = {"SOC_ALLOW_OPEN_ENDPOINTS": "1"}
+        self.assertEqual(self.app.open_endpoint_tokens("0.0.0.0", env), [])
+
+    def test_nom_d_hote_n_est_pas_presume_local(self):
+        self.assertFalse(self.app.is_loopback_bind("soc.example.local"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

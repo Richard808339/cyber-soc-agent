@@ -12,6 +12,7 @@ Lancement : python app.py [--port 8765] [--bind 127.0.0.1]
 
 import argparse
 import hmac
+import ipaddress
 import json
 import os
 import sys
@@ -364,6 +365,38 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
 
+TOKEN_ENV = ("SOC_READ_TOKEN", "SOC_INGEST_TOKEN")
+TRUTHY = {"1", "true", "oui", "yes", "on"}
+
+
+def is_loopback_bind(host):
+    """Vrai si l'interface d'ecoute ne sort pas de la machine."""
+    value = (host or "").strip().lower()
+    if value in ("", "localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        # Un nom d'hote : on ne peut pas prouver qu'il est local, donc on
+        # considere qu'il ne l'est pas. Le doute doit proteger, pas exposer.
+        return False
+
+
+def open_endpoint_tokens(bind, env=None):
+    """Jetons absents qui rendraient l'API ouverte sur une interface reseau.
+
+    Un bind non local avec un jeton vide, c'est une API sans authentification
+    offerte au reseau. Le demarrage doit echouer bruyamment : un avertissement
+    dans une banniere que personne ne lit ne protege de rien.
+    """
+    env = os.environ if env is None else env
+    if is_loopback_bind(bind):
+        return []
+    if (env.get("SOC_ALLOW_OPEN_ENDPOINTS") or "").strip().lower() in TRUTHY:
+        return []
+    return [name for name in TOKEN_ENV if not (env.get(name) or "").strip()]
+
+
 def main():
     load_dotenv()
     ap = argparse.ArgumentParser(description="Tableau de bord SOC")
@@ -371,14 +404,28 @@ def main():
     ap.add_argument("--bind", default=os.environ.get("SOC_BIND", "127.0.0.1"))
     args = ap.parse_args()
 
+    missing = open_endpoint_tokens(args.bind)
+    if missing:
+        sys.stderr.write(
+            "Refus de demarrer : l'interface %s n'est pas locale et %s reste(nt) sans jeton.\n"
+            % (args.bind, ", ".join(missing)))
+        sys.stderr.write(
+            "  Soit definir ces variables, soit assumer l'ouverture avec"
+            " SOC_ALLOW_OPEN_ENDPOINTS=1.\n")
+        return 2
+
     socstore.init()
     httpd = ThreadingHTTPServer((args.bind, args.port), Handler)
     tok = os.environ.get("SOC_INGEST_TOKEN", "")
+    read = os.environ.get("SOC_READ_TOKEN", "")
     print("=" * 66)
     print(" Tableau de bord SOC")
     print(" URL          : http://%s:%d" % (args.bind, args.port))
     print(" Base SQLite  : %s" % socstore.DB_PATH)
     print(" Ingestion    : %s" % ("jeton Bearer requis" if tok else "OUVERTE (definir SOC_INGEST_TOKEN)"))
+    print(" Lecture      : %s" % ("jeton requis" if read
+                                  else ("OUVERTE (interface locale uniquement)"
+                                        if is_loopback_bind(args.bind) else "OUVERTE (assume)")))
     print(" Bilan        : %s" % ("LLM" if os.environ.get("SOC_LLM_API_KEY") else "moteur de regles (aucune cle LLM)"))
     print("=" * 66)
     try:
@@ -389,4 +436,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # sys.exit : un refus de demarrage doit se voir dans le code de sortie,
+    # sinon un script qui lance le tableau de bord le croit demarre.
+    sys.exit(main())
